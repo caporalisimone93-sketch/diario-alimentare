@@ -7,17 +7,41 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#007bff">
     <style>
+        * { box-sizing: border-box; }
         body { font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background-color: #f4f4f9; }
-        .menu { display: flex; gap: 10px; margin-bottom: 15px; }
-        .menu button { background-color: #007bff; flex: 1; padding: 10px; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        .menu button:hover { background-color: #0056b3; }
+        
+        /* MENU */
+        .menu { display: flex; gap: 8px; margin-bottom: 15px; }
+        .menu button { 
+            background-color: #6c757d; flex: 1; padding: 10px; color: white; 
+            border: none; border-radius: 5px; cursor: pointer; font-size: 0.85em;
+            transition: background-color 0.2s;
+        }
+        .menu button.attivo { background-color: #007bff; }
+        .menu button:hover { opacity: 0.9; }
         
         /* CHAT AREA */
         #chat-box { background: white; padding: 15px; border-radius: 10px; height: 400px; overflow-y: auto; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        #chat-box p { margin: 8px 0; line-height: 1.4; }
         .input-area { display: flex; gap: 10px; margin-bottom: 10px; }
         input, select { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-        .btn-invia { padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .btn-invia { padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; transition: opacity 0.2s; }
+        .btn-invia:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-foto { padding: 10px; background-color: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em; line-height: 1; }
+        .btn-foto.ha-foto { background-color: #007bff; }
         
+        /* LOADING DOTS */
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        @keyframes dots {
+            0% { content: ''; }
+            25% { content: '.'; }
+            50% { content: '..'; }
+            75% { content: '...'; }
+        }
+
         /* CONFIG AREA SOTTO CHAT */
         .config-area { background: #eee; padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 0.85em; }
         .config-area h3 { margin: 0 0 8px 0; font-size: 0.9em; color: #555; }
@@ -29,14 +53,60 @@
         #dashboard-box { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: none; }
         .titolo-filtri { font-size: 0.9em; color: #555; margin-bottom: 5px; margin-top: 15px; font-weight: bold; }
         .filtri-tempo { display: flex; flex-wrap: wrap; gap: 5px; }
-        .filtri-tempo button { flex: 1; padding: 6px; font-size: 0.8em; background-color: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        .filtri-tempo button { 
+            flex: 1; padding: 6px; font-size: 0.8em; background-color: #6c757d; 
+            color: white; border: none; border-radius: 3px; cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .filtri-tempo button.attivo { background-color: #007bff; }
         .profilo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
         .select-full { width: 100%; margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 1em; box-sizing: border-box; }
         
         .container-reset { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
         .btn-reset { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 0.75em; font-weight: bold; }
 
+        .backup-area { display: flex; gap: 10px; justify-content: center; }
+        .btn-backup { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 0.85em; font-weight: bold; color: white; }
+        .btn-esporta { background-color: #28a745; }
+        .btn-importa { background-color: #007bff; }
+
         hr { border: 0; border-top: 1px solid #eee; margin: 25px 0; }
+
+        /* PASTI SALVATI */
+        #pasti-salvati-box { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: none; }
+        .pasto-card {
+            background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px;
+            padding: 12px; margin-bottom: 10px; position: relative;
+        }
+        .pasto-card h4 { margin: 0 0 6px 0; color: #333; font-size: 1em; text-transform: capitalize; }
+        .pasto-card .pasto-desc { font-size: 0.85em; color: #555; margin-bottom: 6px; }
+        .pasto-card .pasto-macro { font-size: 0.8em; color: #007bff; }
+        .pasto-card .pasto-macro span { margin-right: 10px; }
+        .btn-elimina-pasto {
+            position: absolute; top: 10px; right: 10px;
+            background: #dc3545; color: white; border: none;
+            border-radius: 4px; padding: 4px 8px; font-size: 0.75em;
+            cursor: pointer;
+        }
+        .nessun-pasto { text-align: center; color: #999; padding: 30px 0; font-size: 0.9em; }
+        .hint-salvare { background: #e7f3ff; border-left: 3px solid #007bff; padding: 10px 12px; border-radius: 0 6px 6px 0; margin-bottom: 15px; font-size: 0.82em; color: #333; line-height: 1.4; }
+
+        /* CONFERMA VISIVA IN CHAT */
+        .conferma-registrazione {
+            background: #d4edda; border-left: 3px solid #28a745;
+            padding: 6px 10px; border-radius: 0 6px 6px 0;
+            font-size: 0.8em; color: #155724; margin-top: 4px; line-height: 1.3;
+        }
+        .conferma-pasto-salvato {
+            background: #e7f3ff; border-left: 3px solid #007bff;
+            padding: 6px 10px; border-radius: 0 6px 6px 0;
+            font-size: 0.8em; color: #004085; margin-top: 4px; line-height: 1.3;
+        }
+        .conferma-correzione {
+            background: #fff3cd; border-left: 3px solid #ffc107;
+            padding: 6px 10px; border-radius: 0 6px 6px 0;
+            font-size: 0.8em; color: #856404; margin-top: 4px; line-height: 1.3;
+        }
     </style>
 </head>
 <body>
@@ -44,17 +114,27 @@
     <h2>🍏 Il Mio Dietologo</h2>
 
     <div class="menu">
-        <button onclick="mostraChat()">💬 Chat</button>
-        <button onclick="mostraDashboard()">📊 Dashboard</button>
+        <button id="btn-menu-chat" class="attivo" onclick="mostraChat()">💬 Chat</button>
+        <button id="btn-menu-dashboard" onclick="mostraDashboard()">📊 Dashboard</button>
+        <button id="btn-menu-pasti" onclick="mostraPastiSalvati()">🍽️ Pasti</button>
     </div>
     
+    <!-- CHAT -->
     <div id="chat-section">
         <div id="chat-box">
             <p><strong>Dietologo:</strong> Ciao! Cosa hai mangiato o fatto oggi?</p>
         </div>
         <div class="input-area" id="input-area">
             <input type="text" id="user-input" placeholder="Scrivi qui...">
-            <button class="btn-invia" onclick="inviaMessaggio()">Invia</button>
+            <input type="file" id="foto-input" accept="image/*" capture="environment" style="display:none" onchange="anteprimaFoto(this)">
+            <button class="btn-foto" id="btn-foto" onclick="document.getElementById('foto-input').click()">📷</button>
+            <button class="btn-invia" id="btn-invia" onclick="inviaMessaggio()">Invia</button>
+        </div>
+        <div id="anteprima-foto" style="display:none; margin-bottom:10px;">
+            <div style="position:relative; display:inline-block;">
+                <img id="anteprima-img" style="max-height:80px; border-radius:6px; border:1px solid #ccc;">
+                <button onclick="rimuoviFoto()" style="position:absolute; top:-6px; right:-6px; background:#dc3545; color:white; border:none; border-radius:50%; width:20px; height:20px; font-size:12px; cursor:pointer; line-height:20px; padding:0;">✕</button>
+            </div>
         </div>
 
         <div class="config-area">
@@ -64,27 +144,27 @@
                 <button class="btn-save-api" onclick="salvaApiKey()">Salva</button>
             </div>
             <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #777;">
-                Chiave salvata solo sul tuo iPhone. <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: #007bff;">Prendi chiave gratis</a>
+                Chiave salvata solo sul tuo dispositivo. <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: #007bff;">Prendi chiave gratis</a>
             </p>
         </div>
     </div>
 
+    <!-- DASHBOARD -->
     <div id="dashboard-box">
         <h3 style="margin-top: 0;">Analisi Nutrizionale</h3>
         <div class="titolo-filtri">Intervallo:</div>
-        <div class="filtri-tempo">
-            <button onclick="cambiaFiltro('oggi')">Oggi</button>
-            <button onclick="cambiaFiltro('settimana')">Settimana</button>
-            <button onclick="cambiaFiltro('mese')">Mese</button>
+        <div class="filtri-tempo" id="filtri-intervallo">
+            <button class="attivo" onclick="cambiaFiltro('settimana', this)">Settimana</button>
+            <button onclick="cambiaFiltro('mese', this)">Mese</button>
         </div>
 
         <div class="titolo-filtri">Metriche Dietetiche:</div>
-        <div class="filtri-tempo filtri-dati">
-            <button onclick="cambiaMetrica('base')">Base</button>
-            <button onclick="cambiaMetrica('deficit')">Deficit</button>
-            <button onclick="cambiaMetrica('proteine')">Proteine</button>
-            <button onclick="cambiaMetrica('carboidrati')">Carbo</button>
-            <button onclick="cambiaMetrica('grassi')">Grassi</button>
+        <div class="filtri-tempo filtri-dati" id="filtri-metriche">
+            <button class="attivo" onclick="cambiaMetrica('base', this)">Base</button>
+            <button onclick="cambiaMetrica('deficit', this)">Deficit</button>
+            <button onclick="cambiaMetrica('proteine', this)">Proteine</button>
+            <button onclick="cambiaMetrica('carboidrati', this)">Carbo</button>
+            <button onclick="cambiaMetrica('grassi', this)">Grassi</button>
         </div>
         <canvas id="graficoCalorie" style="margin-top: 15px;"></canvas>
 
@@ -113,9 +193,9 @@
         <hr>
 
         <h3>Andamento Fisico</h3>
-        <div class="filtri-tempo filtri-dati" style="margin-bottom: 10px;">
-            <button onclick="cambiaMetricaFisica('peso')" style="background-color: #e83e8c;">Peso</button>
-            <button onclick="cambiaMetricaFisica('bmi')" style="background-color: #6f42c1;">BMI</button>
+        <div class="filtri-tempo filtri-dati" id="filtri-fisico" style="margin-bottom: 10px;">
+            <button class="attivo" onclick="cambiaMetricaFisica('peso', this)" style="background-color: #e83e8c;">Peso</button>
+            <button onclick="cambiaMetricaFisica('bmi', this)" style="background-color: #6f42c1;">BMI</button>
         </div>
         <canvas id="graficoFisico"></canvas>
 
@@ -123,6 +203,26 @@
             <button class="btn-reset" onclick="resetDatiGiorno(1)">🗑️ Reset Ieri</button>
             <button class="btn-reset" onclick="resetDatiGiorno(0)">🗑️ Reset Oggi</button>
         </div>
+
+        <hr>
+
+        <h3>💾 Backup Dati</h3>
+        <div class="backup-area">
+            <button class="btn-backup btn-esporta" onclick="esportaDati()">📤 Esporta JSON</button>
+            <button class="btn-backup btn-importa" onclick="document.getElementById('file-import').click()">📥 Importa JSON</button>
+            <input type="file" id="file-import" accept=".json" style="display:none" onchange="importaDati(this)">
+        </div>
+        <p id="stato-backup" style="font-size:0.8em; color:#666; text-align:center; margin-top:8px;"></p>
+    </div>
+
+    <!-- PASTI SALVATI -->
+    <div id="pasti-salvati-box">
+        <h3 style="margin-top: 0;">🍽️ I Miei Pasti Salvati</h3>
+        <div class="hint-salvare">
+            💡 Per salvare un pasto, scrivilo in chat e aggiungi <strong>"salva come [nome]"</strong>.<br>
+            Es: <em>"200g petto di pollo, riso e verdure, salva come pranzo classico"</em>
+        </div>
+        <div id="lista-pasti-salvati"></div>
     </div>
 
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
