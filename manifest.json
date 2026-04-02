@@ -1,0 +1,15 @@
+{
+  "name": "Il Mio Dietologo",
+  "short_name": "Dietologo",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#f4f4f9",
+  "theme_color": "#007bff",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2927/2927347.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
