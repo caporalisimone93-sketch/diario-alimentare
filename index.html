@@ -24,12 +24,11 @@
         
         .profilo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
         
-        /* Nuovi stili per i bottoni di reset in fondo */
         .container-reset { 
             display: flex; 
             justify-content: center; 
             gap: 15px; 
-            margin-top: 30px; 
+            margin-top: 10px; 
             padding-top: 10px;
         }
         .btn-reset { 
@@ -44,6 +43,9 @@
             transition: 0.3s;
         }
         .btn-reset:hover { background-color: #dc3545; color: white; }
+
+        .config-area { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #eee; margin-top: 20px; }
+        .config-area h3 { margin-top: 0; font-size: 1em; }
 
         hr { border: 0; border-top: 1px solid #eee; margin: 25px 0; }
     </style>
@@ -107,6 +109,19 @@
             <button onclick="cambiaMetricaFisica('bmi')" style="background-color: #6f42c1;">BMI</button>
         </div>
         <canvas id="graficoFisico"></canvas>
+
+        <hr>
+
+        <div class="config-area">
+            <h3>Configurazione API</h3>
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <input type="password" id="api-key-input" placeholder="Incolla qui la tua API Key">
+                <button class="btn-invia" onclick="salvaApiKey()" style="background-color: #007bff;">Salva</button>
+            </div>
+            <p style="font-size: 0.7em; color: #666; margin: 0;">
+                Ottieni una chiave gratuita su <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.
+            </p>
+        </div>
 
         <div class="container-reset">
             <button class="btn-reset" onclick="resetDatiGiorno(1)">🗑️ Reset Ieri</button>
