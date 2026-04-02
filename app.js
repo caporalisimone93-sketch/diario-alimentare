@@ -102,9 +102,11 @@ async function inviaMessaggio() {
 async function faiDomandaAGemini(testo, apiKey) {
     const dataOggi = ottieniData(0);
     const dataIeri = ottieniData(1);
+    
     const recordOggi = await db.diario.get(dataOggi) || { calorieMangiate: 0, calorieBruciate: 0 };
     const recordIeri = await db.diario.get(dataIeri) || { calorieMangiate: 0, calorieBruciate: 0 };
     const pastiSalvati = await db.pastiTipici.toArray();
+    
     let memoriaPasti = "Pasti tipici: " + pastiSalvati.map(p => `"${p.nome}" (${p.calorie}kcal)`).join(", ");
     const tdeeAttuale = await ottieniTDEEAttuale();
 
@@ -122,17 +124,28 @@ Formato JSON obbligatorio alla fine:
 \`\`\``;
 
     const requestBody = {
-        contents: [{ parts: [{ text: `SYSTEM: ${systemInstruction}\nUSER: ${testo}` }] }]
+        contents: [{
+            parts: [{ text: `SYSTEM INSTRUCTION: ${systemInstruction}\n\nUSER INPUT: ${testo}` }]
+        }]
     };
 
-    const response = await fetch(`${API_URL}?key=${apiKey}`, {
+    // MODIFICA CRUCIALE: Chiave passata nell'header x-goog-api-key invece che nell'URL
+    const response = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey 
+        },
         body: JSON.stringify(requestBody)
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || 'Errore API');
+    if (!response.ok) {
+        if (data.error?.status === "UNAUTHENTICATED") {
+            throw new Error("Chiave API non valida o scaduta. Controlla la configurazione.");
+        }
+        throw new Error(data.error?.message || 'Errore API');
+    }
     
     const testoRisposta = data.candidates[0].content.parts[0].text;
     try {
