@@ -276,6 +276,7 @@ async function salvaProfilo() {
         bmr = 447.6 + (9.2 * peso) + (3.1 * altezza) - (4.3 * eta);
     }
     const fattoreAttivita = parseFloat(document.getElementById('input-attivita').value);
+alert("Fattore letto: " + fattoreAttivita); // <-- aggiungi questa riga
 const tdee = Math.round(bmr * fattoreAttivita);
 
     const oggi = ottieniData(0);
