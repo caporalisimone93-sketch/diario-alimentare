@@ -13,7 +13,7 @@ function salvaApiKey() {
     const key = keyInput.value.trim();
     if (key) {
         localStorage.setItem('gemini_api_key', key);
-        alert("Chiave API salvata localmente sul dispositivo!");
+        alert("Chiave API salvata localmente!");
         keyInput.value = "";
     } else {
         alert("Inserisci una chiave valida.");
@@ -28,7 +28,7 @@ function ottieniApiKey() {
 const db = new Dexie("DiarioAlimentareDB");
 db.version(2).stores({
     pastiTipici: 'nome, descrizione, calorie, proteine, carboidrati, grassi',
-    diario: 'data, calorieMangiate, proteine, carbo, grassi, calorieBruciate'
+    diario: 'data, calorieMangiate, proteine, carbo, grassi, calorieBurned'
 });
 
 db.on('populate', function() {
@@ -39,25 +39,24 @@ db.on('populate', function() {
     });
 });
 
-// PROTEZIONE XSS (Sanitizzazione semplice)
+// PROTEZIONE XSS
 function escapeHTML(str) {
     const p = document.createElement('p');
     p.textContent = str;
     return p.innerHTML;
 }
 
-// FUNZIONE PER RESETTARE I DATI
+// FUNZIONE RESET
 async function resetDatiGiorno(giorniIndietro) {
     const dataTarget = ottieniData(giorniIndietro);
-    const confermi = confirm(`Vuoi davvero azzerare i pasti e l'allenamento di ${giorniIndietro === 0 ? 'OGGI' : 'IERI'} (${dataTarget})?`);
-    
+    const confermi = confirm(`Vuoi davvero azzerare i pasti e lo sport di ${giorniIndietro === 0 ? 'OGGI' : 'IERI'}?`);
     if (confermi) {
-        const recordEsistente = await db.diario.get(dataTarget);
-        if (recordEsistente) {
+        const record = await db.diario.get(dataTarget);
+        if (record) {
             await db.diario.update(dataTarget, {
                 calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0
             });
-            alert("Dati resettati!");
+            alert("Resettato!");
             if (document.getElementById("dashboard-box").style.display === "block") disegnaGrafico();
         }
     }
@@ -83,7 +82,7 @@ async function inviaMessaggio() {
 
     const apiKey = ottieniApiKey();
     if (!apiKey) {
-        alert("Manca la API Key! Vai nella Dashboard in fondo per configurarla.");
+        alert("Inserisci la API Key nel campo sotto la chat!");
         return;
     }
 
@@ -94,7 +93,6 @@ async function inviaMessaggio() {
     try {
         const risposta = await faiDomandaAGemini(testoUtente, apiKey);
         const chatBox = document.getElementById("chat-box");
-        // Sanitizzazione output per prevenire XSS
         chatBox.lastElementChild.innerHTML = `<strong>Dietologo:</strong> ${escapeHTML(risposta)}`;
     } catch (error) {
         document.getElementById("chat-box").lastElementChild.innerHTML = `<strong>Errore:</strong> ${escapeHTML(error.message)}`;
@@ -104,11 +102,9 @@ async function inviaMessaggio() {
 async function faiDomandaAGemini(testo, apiKey) {
     const dataOggi = ottieniData(0);
     const dataIeri = ottieniData(1);
-    
     const recordOggi = await db.diario.get(dataOggi) || { calorieMangiate: 0, calorieBruciate: 0 };
     const recordIeri = await db.diario.get(dataIeri) || { calorieMangiate: 0, calorieBruciate: 0 };
     const pastiSalvati = await db.pastiTipici.toArray();
-    
     let memoriaPasti = "Pasti tipici: " + pastiSalvati.map(p => `"${p.nome}" (${p.calorie}kcal)`).join(", ");
     const tdeeAttuale = await ottieniTDEEAttuale();
 
@@ -126,9 +122,7 @@ Formato JSON obbligatorio alla fine:
 \`\`\``;
 
     const requestBody = {
-        contents: [{
-            parts: [{ text: `SYSTEM INSTRUCTION: ${systemInstruction}\n\nUSER INPUT: ${testo}` }]
-        }]
+        contents: [{ parts: [{ text: `SYSTEM: ${systemInstruction}\nUSER: ${testo}` }] }]
     };
 
     const response = await fetch(`${API_URL}?key=${apiKey}`, {
@@ -141,14 +135,13 @@ Formato JSON obbligatorio alla fine:
     if (!response.ok) throw new Error(data.error?.message || 'Errore API');
     
     const testoRisposta = data.candidates[0].content.parts[0].text;
-
     try {
         const parti = testoRisposta.split("```json");
         if (parti.length > 1) {
             const datiNuovi = JSON.parse(parti[1].split("```")[0].trim());
             await aggiornaDiario(datiNuovi);
         }
-    } catch(e) { console.error("Errore parsing JSON", e); }
+    } catch(e) { console.error("JSON Error", e); }
 
     return testoRisposta.split("```json")[0].trim();
 }
@@ -156,7 +149,6 @@ Formato JSON obbligatorio alla fine:
 async function aggiornaDiario(datiNuovi) {
     const dataTarget = datiNuovi.data_riferimento || ottieniData(0); 
     const recordTarget = await db.diario.get(dataTarget) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
-
     await db.diario.put({
         ...recordTarget,
         data: dataTarget,
@@ -171,7 +163,6 @@ async function aggiornaDiario(datiNuovi) {
 function aggiungiMessaggio(m, t) {
     const c = document.getElementById("chat-box");
     const p = document.createElement("p");
-    // Uso escapeHTML per evitare che codice malevolo nell'input utente venga eseguito
     p.innerHTML = `<strong>${m}:</strong> ${escapeHTML(t).replace(/\n/g, "<br>")}`;
     c.appendChild(p);
     c.scrollTop = c.scrollHeight;
@@ -189,23 +180,20 @@ async function salvaProfilo() {
     const altezza = parseFloat(document.getElementById('input-altezza').value);
     const eta = parseInt(document.getElementById('input-eta').value);
     const sesso = document.getElementById('input-sesso').value;
-
-    if(!peso || !altezza || !eta) return alert("Compila tutti i campi!");
-
-    localStorage.setItem('profilo_altezza', altezza);
-    localStorage.setItem('profilo_eta', eta);
-    localStorage.setItem('profilo_sesso', sesso);
+    if(!peso || !altezza || !eta) return alert("Compila i campi!");
 
     const bmr = calcolaBMR(peso, altezza, eta, sesso);
     const tdee = bmr * 1.2; 
     const bmi = peso / ((altezza/100) * (altezza/100));
 
-    document.getElementById('risultato-profilo').innerHTML = `BMR: ${Math.round(bmr)} | TDEE: ${Math.round(tdee)} | BMI: ${bmi.toFixed(1)}`;
+    localStorage.setItem('profilo_altezza', altezza);
+    localStorage.setItem('profilo_eta', eta);
+    localStorage.setItem('profilo_sesso', sesso);
 
     const oggi = ottieniData(0);
     const recordOggi = await db.diario.get(oggi) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
     await db.diario.put({ ...recordOggi, data: oggi, peso, bmi, bmr, tdee });
-    if(chartInstance || chartFisicoInstance) disegnaGrafico();
+    alert("Profilo Salvato!");
 }
 
 async function caricaProfiloInUI() {
@@ -220,23 +208,21 @@ async function caricaProfiloInUI() {
     }
 }
 
-// LOGICA DASHBOARD
-let chartInstance = null, chartFisicoInstance = null; 
-let filtroAttuale = 'settimana', metricaAttuale = 'base', metricaFisicaAttuale = 'peso';
-
+// CAMBIO PAGINA
 function mostraChat() {
-    document.getElementById("chat-box").style.display = "block";
-    document.getElementById("input-area").style.display = "flex";
+    document.getElementById("chat-section").style.display = "block";
     document.getElementById("dashboard-box").style.display = "none";
 }
 
 function mostraDashboard() {
-    document.getElementById("chat-box").style.display = "none";
-    document.getElementById("input-area").style.display = "none";
+    document.getElementById("chat-section").style.display = "none";
     document.getElementById("dashboard-box").style.display = "block";
     caricaProfiloInUI();
     disegnaGrafico();
 }
+
+let chartInstance = null, chartFisicoInstance = null; 
+let filtroAttuale = 'settimana', metricaAttuale = 'base', metricaFisicaAttuale = 'peso';
 
 function cambiaFiltro(n) { filtroAttuale = n; disegnaGrafico(); }
 function cambiaMetrica(n) { metricaAttuale = n; disegnaGrafico(); }
