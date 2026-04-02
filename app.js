@@ -5,8 +5,8 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.log("Errore SW:", err));
 }
 
-// CONFIGURAZIONE API (BYOK)
-const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+// CONFIGURAZIONE API (BYOK) - Endpoint aggiornato secondo la documentazione ufficiale
+const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
 
 function salvaApiKey() {
     const keyInput = document.getElementById('api-key-input');
@@ -28,7 +28,7 @@ function ottieniApiKey() {
 const db = new Dexie("DiarioAlimentareDB");
 db.version(2).stores({
     pastiTipici: 'nome, descrizione, calorie, proteine, carboidrati, grassi',
-    diario: 'data, calorieMangiate, proteine, carbo, grassi, calorieBurned'
+    diario: 'data, calorieMangiate, proteine, carbo, grassi, calorieBruciate'
 });
 
 db.on('populate', function() {
@@ -93,7 +93,7 @@ async function inviaMessaggio() {
     try {
         const risposta = await faiDomandaAGemini(testoUtente, apiKey);
         const chatBox = document.getElementById("chat-box");
-        chatBox.lastElementChild.innerHTML = `<strong>Dietologo:</strong> ${escapeHTML(risposta)}`;
+        chatBox.lastElementChild.innerHTML = `<strong>Dietologo:</strong> ${risposta}`;
     } catch (error) {
         document.getElementById("chat-box").lastElementChild.innerHTML = `<strong>Errore:</strong> ${escapeHTML(error.message)}`;
     }
@@ -107,29 +107,28 @@ async function faiDomandaAGemini(testo, apiKey) {
     const recordIeri = await db.diario.get(dataIeri) || { calorieMangiate: 0, calorieBruciate: 0 };
     const pastiSalvati = await db.pastiTipici.toArray();
     
-    let memoriaPasti = "Pasti tipici: " + pastiSalvati.map(p => `"${p.nome}" (${p.calorie}kcal)`).join(", ");
+    let memoriaPasti = "Pasti tipici salvati: " + pastiSalvati.map(p => `"${p.nome}" (${p.calorie}kcal)`).join(", ");
     const tdeeAttuale = await ottieniTDEEAttuale();
 
-    const systemInstruction = `Sei un dietologo sintetico. Analizza l'input dell'utente.
-REGOLE RIGIDE:
+    // Istruzioni di sistema integrate nel prompt per compatibilità v1beta
+    const promptSistema = `Sei un dietologo sintetico. Analizza l'input dell'utente.
+REGOLE:
 1. Capisci se l'utente parla di OGGI (${dataOggi}) o di IERI (${dataIeri}).
-2. Rispondi SOLO con l'analisi del nuovo pasto/allenamento e un commento tecnico brevissimo.
-3. Dati già salvati: OGGI = ${recordOggi.calorieMangiate} kcal, IERI = ${recordIeri.calorieMangiate} kcal.
-4. ${memoriaPasti}
-Fabbisogno Base: ${Math.round(tdeeAttuale)} kcal.
+2. Rispondi con un commento tecnico brevissimo e i totali.
+3. Dati attuali: OGGI ${recordOggi.calorieMangiate} kcal, IERI ${recordIeri.calorieMangiate} kcal.
+4. ${memoriaPasti}. Fabbisogno Base: ${Math.round(tdeeAttuale)} kcal.
 
-Formato JSON obbligatorio alla fine:
+DEVI chiudere la risposta con questo formato JSON preciso:
 \`\`\`json
 {"data_riferimento": "${dataOggi}", "calorie_mangiate": 0, "proteine": 0, "carboidrati": 0, "grassi": 0, "calorie_bruciate": 0}
 \`\`\``;
 
     const requestBody = {
         contents: [{
-            parts: [{ text: `SYSTEM INSTRUCTION: ${systemInstruction}\n\nUSER INPUT: ${testo}` }]
+            parts: [{ text: `${promptSistema}\n\nUSER INPUT: ${testo}` }]
         }]
     };
 
-    // MODIFICA CRUCIALE: Chiave passata nell'header x-goog-api-key invece che nell'URL
     const response = await fetch(API_URL, {
         method: "POST",
         headers: { 
@@ -141,20 +140,20 @@ Formato JSON obbligatorio alla fine:
 
     const data = await response.json();
     if (!response.ok) {
-        if (data.error?.status === "UNAUTHENTICATED") {
-            throw new Error("Chiave API non valida o scaduta. Controlla la configurazione.");
-        }
-        throw new Error(data.error?.message || 'Errore API');
+        throw new Error(data.error?.message || 'Errore nella comunicazione con Gemini');
     }
     
     const testoRisposta = data.candidates[0].content.parts[0].text;
+
     try {
         const parti = testoRisposta.split("```json");
         if (parti.length > 1) {
             const datiNuovi = JSON.parse(parti[1].split("```")[0].trim());
             await aggiornaDiario(datiNuovi);
         }
-    } catch(e) { console.error("JSON Error", e); }
+    } catch(e) { 
+        console.error("Errore nel parsing del JSON inviato dall'AI", e); 
+    }
 
     return testoRisposta.split("```json")[0].trim();
 }
@@ -162,6 +161,7 @@ Formato JSON obbligatorio alla fine:
 async function aggiornaDiario(datiNuovi) {
     const dataTarget = datiNuovi.data_riferimento || ottieniData(0); 
     const recordTarget = await db.diario.get(dataTarget) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
+    
     await db.diario.put({
         ...recordTarget,
         data: dataTarget,
@@ -176,7 +176,7 @@ async function aggiornaDiario(datiNuovi) {
 function aggiungiMessaggio(m, t) {
     const c = document.getElementById("chat-box");
     const p = document.createElement("p");
-    p.innerHTML = `<strong>${m}:</strong> ${escapeHTML(t).replace(/\n/g, "<br>")}`;
+    p.innerHTML = `<strong>${m}:</strong> ${t.replace(/\n/g, "<br>")}`;
     c.appendChild(p);
     c.scrollTop = c.scrollHeight;
 }
@@ -206,7 +206,7 @@ async function salvaProfilo() {
     const oggi = ottieniData(0);
     const recordOggi = await db.diario.get(oggi) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
     await db.diario.put({ ...recordOggi, data: oggi, peso, bmi, bmr, tdee });
-    alert("Profilo Salvato!");
+    alert("Profilo Fisico aggiornato correttamente!");
 }
 
 async function caricaProfiloInUI() {
@@ -221,7 +221,7 @@ async function caricaProfiloInUI() {
     }
 }
 
-// CAMBIO PAGINA
+// NAVIGAZIONE
 function mostraChat() {
     document.getElementById("chat-section").style.display = "block";
     document.getElementById("dashboard-box").style.display = "none";
