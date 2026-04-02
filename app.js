@@ -1,3 +1,11 @@
+// RIMUOVI DOPO IL PRIMO CARICAMENTO
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((r) => r.unregister());
+  });
+  caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
+}
+
 // 1. REGOLE DI BASE E CONFIGURAZIONE
 const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
