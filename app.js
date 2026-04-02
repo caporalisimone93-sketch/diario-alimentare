@@ -5,6 +5,8 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.log("Errore SW:", err));
 }
 
+// CONFIGURAZIONE API (BYOK)
+// Endpoint corretto: rimosso "-latest" che spesso causa problemi di "not found" in v1beta
 const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
 function salvaApiKey() {
@@ -45,7 +47,19 @@ function escapeHTML(str) {
     return p.innerHTML;
 }
 
-// FUNZIONE RESET
+// FUNZIONI DATA E UTILITY
+function ottieniData(giorniIndietro = 0) {
+    const d = new Date();
+    d.setDate(d.getDate() - giorniIndietro);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+async function ottieniTDEEAttuale() {
+    const tuttiIDati = await db.diario.orderBy('data').reverse().toArray();
+    const recordConTDEE = tuttiIDati.find(d => d.tdee);
+    return recordConTDEE ? recordConTDEE.tdee : 2300; 
+}
+
 async function resetDatiGiorno(giorniIndietro) {
     const dataTarget = ottieniData(giorniIndietro);
     const confermi = confirm(`Vuoi davvero azzerare i pasti e lo sport di ${giorniIndietro === 0 ? 'OGGI' : 'IERI'}?`);
@@ -59,18 +73,6 @@ async function resetDatiGiorno(giorniIndietro) {
             if (document.getElementById("dashboard-box").style.display === "block") disegnaGrafico();
         }
     }
-}
-
-function ottieniData(giorniIndietro = 0) {
-    const d = new Date();
-    d.setDate(d.getDate() - giorniIndietro);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-async function ottieniTDEEAttuale() {
-    const tuttiIDati = await db.diario.orderBy('data').reverse().toArray();
-    const recordConTDEE = tuttiIDati.find(d => d.tdee);
-    return recordConTDEE ? recordConTDEE.tdee : 2300; 
 }
 
 // LOGICA CHAT
@@ -92,8 +94,11 @@ async function inviaMessaggio() {
     try {
         const risposta = await faiDomandaAGemini(testoUtente, apiKey);
         const chatBox = document.getElementById("chat-box");
-        chatBox.lastElementChild.innerHTML = `<strong>Dietologo:</strong> ${risposta}`;
+        // Puliamo la risposta dal blocco JSON per mostrarla all'utente
+        const testoPulito = risposta.replace(/```json[\s\S]*?```/g, "").trim();
+        chatBox.lastElementChild.innerHTML = `<strong>Dietologo:</strong> ${testoPulito || "Dati aggiornati!"}`;
     } catch (error) {
+        console.error(error);
         document.getElementById("chat-box").lastElementChild.innerHTML = `<strong>Errore:</strong> ${escapeHTML(error.message)}`;
     }
 }
@@ -106,18 +111,17 @@ async function faiDomandaAGemini(testo, apiKey) {
     const recordIeri = await db.diario.get(dataIeri) || { calorieMangiate: 0, calorieBruciate: 0 };
     const pastiSalvati = await db.pastiTipici.toArray();
     
-    let memoriaPasti = "Pasti tipici salvati: " + pastiSalvati.map(p => `"${p.nome}" (${p.calorie}kcal)`).join(", ");
+    let memoriaPasti = "Pasti tipici: " + pastiSalvati.map(p => `"${p.nome}" (${p.calorie}kcal)`).join(", ");
     const tdeeAttuale = await ottieniTDEEAttuale();
 
-    // Istruzioni di sistema integrate nel prompt per compatibilità v1beta
-    const promptSistema = `Sei un dietologo sintetico. Analizza l'input dell'utente.
+    const promptSistema = `Sei un dietologo sintetico. Analizza l'input.
 REGOLE:
 1. Capisci se l'utente parla di OGGI (${dataOggi}) o di IERI (${dataIeri}).
-2. Rispondi con un commento tecnico brevissimo e i totali.
+2. Rispondi con un commento tecnico brevissimo.
 3. Dati attuali: OGGI ${recordOggi.calorieMangiate} kcal, IERI ${recordIeri.calorieMangiate} kcal.
 4. ${memoriaPasti}. Fabbisogno Base: ${Math.round(tdeeAttuale)} kcal.
 
-DEVI chiudere la risposta con questo formato JSON preciso:
+DEVI includere a fine risposta questo JSON:
 \`\`\`json
 {"data_riferimento": "${dataOggi}", "calorie_mangiate": 0, "proteine": 0, "carboidrati": 0, "grassi": 0, "calorie_bruciate": 0}
 \`\`\``;
@@ -128,33 +132,36 @@ DEVI chiudere la risposta con questo formato JSON preciso:
         }]
     };
 
+    // Uso l'API Key nell'header con la capitalizzazione standard
     const response = await fetch(API_URL, {
         method: "POST",
         headers: { 
             "Content-Type": "application/json",
-            "x-goog-api-key": apiKey 
+            "X-Goog-Api-Key": apiKey 
         },
         body: JSON.stringify(requestBody)
     });
 
     const data = await response.json();
     if (!response.ok) {
-        throw new Error(data.error?.message || 'Errore nella comunicazione con Gemini');
+        throw new Error(data.error?.message || 'Errore API Gemini');
     }
     
     const testoRisposta = data.candidates[0].content.parts[0].text;
 
+    // Estrazione e parsing del JSON
     try {
-        const parti = testoRisposta.split("```json");
-        if (parti.length > 1) {
-            const datiNuovi = JSON.parse(parti[1].split("```")[0].trim());
+        const regexJson = /```json([\s\S]*?)```/;
+        const match = testoRisposta.match(regexJson);
+        if (match && match[1]) {
+            const datiNuovi = JSON.parse(match[1].trim());
             await aggiornaDiario(datiNuovi);
         }
     } catch(e) { 
-        console.error("Errore nel parsing del JSON inviato dall'AI", e); 
+        console.error("Errore parsing JSON AI:", e); 
     }
 
-    return testoRisposta.split("```json")[0].trim();
+    return testoRisposta;
 }
 
 async function aggiornaDiario(datiNuovi) {
@@ -166,9 +173,9 @@ async function aggiornaDiario(datiNuovi) {
         data: dataTarget,
         calorieMangiate: (recordTarget.calorieMangiate || 0) + (datiNuovi.calorie_mangiate || 0),
         proteine: (recordTarget.proteine || 0) + (datiNuovi.proteine || 0),
-        carbo: (recordTarget.carbo || 0) + (datiNuovi.carboidrati || 0),
+        carbo: (recordTarget.carboidrati || 0) + (datiNuovi.carboidrati || 0),
         grassi: (recordTarget.grassi || 0) + (datiNuovi.grassi || 0),
-        calorieBruciate: (recordTarget.calorieBruciate || 0) + (datiNuovi.calorie_bruciate || 0)
+        calorieBruciate: (recordTarget.calorie_bruciate || 0) + (datiNuovi.calorie_bruciate || 0)
     });
 }
 
@@ -205,7 +212,7 @@ async function salvaProfilo() {
     const oggi = ottieniData(0);
     const recordOggi = await db.diario.get(oggi) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
     await db.diario.put({ ...recordOggi, data: oggi, peso, bmi, bmr, tdee });
-    alert("Profilo Fisico aggiornato correttamente!");
+    alert("Profilo Fisico aggiornato!");
 }
 
 async function caricaProfiloInUI() {
