@@ -1,5 +1,5 @@
 // 1. REGOLE DI BASE E CONFIGURAZIONE
-const API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent";
+const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
 // Registrazione SW con pulizia cache per evitare vecchie versioni
 if ('serviceWorker' in navigator) {
