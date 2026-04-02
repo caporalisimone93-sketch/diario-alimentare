@@ -5,8 +5,7 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.log("Errore SW:", err));
 }
 
-// CONFIGURAZIONE API (BYOK) - Endpoint aggiornato secondo la documentazione ufficiale
-const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
+const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
 function salvaApiKey() {
     const keyInput = document.getElementById('api-key-input');
