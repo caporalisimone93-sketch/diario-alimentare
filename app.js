@@ -5,9 +5,26 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.log("Errore SW:", err));
 }
 
-const API_KEY = 'AIzaSyAXB3iurdvUWrY2fIR0g7sqySttrDdWI0A'; 
-const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
+// CONFIGURAZIONE API (BYOK)
+const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
+function salvaApiKey() {
+    const keyInput = document.getElementById('api-key-input');
+    const key = keyInput.value.trim();
+    if (key) {
+        localStorage.setItem('gemini_api_key', key);
+        alert("Chiave API salvata localmente sul dispositivo!");
+        keyInput.value = "";
+    } else {
+        alert("Inserisci una chiave valida.");
+    }
+}
+
+function ottieniApiKey() {
+    return localStorage.getItem('gemini_api_key');
+}
+
+// DATABASE (DEXIE)
 const db = new Dexie("DiarioAlimentareDB");
 db.version(2).stores({
     pastiTipici: 'nome, descrizione, calorie, proteine, carboidrati, grassi',
@@ -22,6 +39,13 @@ db.on('populate', function() {
     });
 });
 
+// PROTEZIONE XSS (Sanitizzazione semplice)
+function escapeHTML(str) {
+    const p = document.createElement('p');
+    p.textContent = str;
+    return p.innerHTML;
+}
+
 // FUNZIONE PER RESETTARE I DATI
 async function resetDatiGiorno(giorniIndietro) {
     const dataTarget = ottieniData(giorniIndietro);
@@ -30,18 +54,11 @@ async function resetDatiGiorno(giorniIndietro) {
     if (confermi) {
         const recordEsistente = await db.diario.get(dataTarget);
         if (recordEsistente) {
-            // Manteniamo i dati fisici (peso, tdee) ma azzeriamo i nutrienti
             await db.diario.update(dataTarget, {
-                calorieMangiate: 0,
-                proteine: 0,
-                carbo: 0,
-                grassi: 0,
-                calorieBruciate: 0
+                calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0
             });
-            alert("Dati resettati con successo!");
-            if (document.getElementById("dashboard-box").style.display === "block") {
-                disegnaGrafico();
-            }
+            alert("Dati resettati!");
+            if (document.getElementById("dashboard-box").style.display === "block") disegnaGrafico();
         }
     }
 }
@@ -58,25 +75,33 @@ async function ottieniTDEEAttuale() {
     return recordConTDEE ? recordConTDEE.tdee : 2300; 
 }
 
+// LOGICA CHAT
 async function inviaMessaggio() {
     const inputField = document.getElementById("user-input");
-    const testoUtente = inputField.value;
+    const testoUtente = inputField.value.trim();
     if (!testoUtente) return; 
+
+    const apiKey = ottieniApiKey();
+    if (!apiKey) {
+        alert("Manca la API Key! Vai nella Dashboard in fondo per configurarla.");
+        return;
+    }
 
     aggiungiMessaggio("Tu", testoUtente);
     inputField.value = ""; 
     aggiungiMessaggio("Dietologo", "...");
 
     try {
-        const risposta = await faiDomandaAGemini(testoUtente);
+        const risposta = await faiDomandaAGemini(testoUtente, apiKey);
         const chatBox = document.getElementById("chat-box");
-        chatBox.lastElementChild.innerHTML = `<strong>Dietologo:</strong> ${risposta}`;
+        // Sanitizzazione output per prevenire XSS
+        chatBox.lastElementChild.innerHTML = `<strong>Dietologo:</strong> ${escapeHTML(risposta)}`;
     } catch (error) {
-        document.getElementById("chat-box").lastElementChild.innerHTML = `<strong>Errore:</strong> ${error.message}`;
+        document.getElementById("chat-box").lastElementChild.innerHTML = `<strong>Errore:</strong> ${escapeHTML(error.message)}`;
     }
 }
 
-async function faiDomandaAGemini(testo) {
+async function faiDomandaAGemini(testo, apiKey) {
     const dataOggi = ottieniData(0);
     const dataIeri = ottieniData(1);
     
@@ -89,13 +114,11 @@ async function faiDomandaAGemini(testo) {
 
     const systemInstruction = `Sei un dietologo sintetico. Analizza l'input dell'utente.
 REGOLE RIGIDE:
-1. Capisci se l'utente parla di OGGI (${dataOggi}) o di IERI (${dataIeri}). Se non specifica, assumi OGGI.
+1. Capisci se l'utente parla di OGGI (${dataOggi}) o di IERI (${dataIeri}).
 2. Rispondi SOLO con l'analisi del nuovo pasto/allenamento e un commento tecnico brevissimo.
-3. Mostra i totali giornalieri AGGIORNATI del giorno corretto.
-4. Dati già salvati: OGGI = ${recordOggi.calorieMangiate} kcal assunte. IERI = ${recordIeri.calorieMangiate} kcal assunte.
-5. Niente saluti o introduzioni.
-6. ${memoriaPasti}
-Fabbisogno Base dell'utente: ${Math.round(tdeeAttuale)} kcal.
+3. Dati già salvati: OGGI = ${recordOggi.calorieMangiate} kcal, IERI = ${recordIeri.calorieMangiate} kcal.
+4. ${memoriaPasti}
+Fabbisogno Base: ${Math.round(tdeeAttuale)} kcal.
 
 Formato JSON obbligatorio alla fine:
 \`\`\`json
@@ -103,18 +126,19 @@ Formato JSON obbligatorio alla fine:
 \`\`\``;
 
     const requestBody = {
-        system_instruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: "user", parts: [{ text: testo }] }]
+        contents: [{
+            parts: [{ text: `SYSTEM INSTRUCTION: ${systemInstruction}\n\nUSER INPUT: ${testo}` }]
+        }]
     };
 
-    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+    const response = await fetch(`${API_URL}?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody)
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || 'Errore');
+    if (!response.ok) throw new Error(data.error?.message || 'Errore API');
     
     const testoRisposta = data.candidates[0].content.parts[0].text;
 
@@ -124,7 +148,7 @@ Formato JSON obbligatorio alla fine:
             const datiNuovi = JSON.parse(parti[1].split("```")[0].trim());
             await aggiornaDiario(datiNuovi);
         }
-    } catch(e) { console.error("Errore JSON", e); }
+    } catch(e) { console.error("Errore parsing JSON", e); }
 
     return testoRisposta.split("```json")[0].trim();
 }
@@ -136,28 +160,28 @@ async function aggiornaDiario(datiNuovi) {
     await db.diario.put({
         ...recordTarget,
         data: dataTarget,
-        calorieMangiate: (recordTarget.calorieMangiate || 0) + datiNuovi.calorie_mangiate,
-        proteine: (recordTarget.proteine || 0) + datiNuovi.proteine,
-        carbo: (recordTarget.carbo || 0) + datiNuovi.carboidrati,
-        grassi: (recordTarget.grassi || 0) + datiNuovi.grassi,
-        calorieBruciate: (recordTarget.calorieBruciate || 0) + datiNuovi.calorie_bruciate
+        calorieMangiate: (recordTarget.calorieMangiate || 0) + (datiNuovi.calorie_mangiate || 0),
+        proteine: (recordTarget.proteine || 0) + (datiNuovi.proteine || 0),
+        carbo: (recordTarget.carbo || 0) + (datiNuovi.carboidrati || 0),
+        grassi: (recordTarget.grassi || 0) + (datiNuovi.grassi || 0),
+        calorieBruciate: (recordTarget.calorieBruciate || 0) + (datiNuovi.calorie_bruciate || 0)
     });
 }
 
 function aggiungiMessaggio(m, t) {
     const c = document.getElementById("chat-box");
     const p = document.createElement("p");
-    p.innerHTML = `<strong>${m}:</strong> ${t.replace(/\n/g, "<br>")}`;
+    // Uso escapeHTML per evitare che codice malevolo nell'input utente venga eseguito
+    p.innerHTML = `<strong>${m}:</strong> ${escapeHTML(t).replace(/\n/g, "<br>")}`;
     c.appendChild(p);
     c.scrollTop = c.scrollHeight;
 }
 
 document.getElementById("user-input").addEventListener("keypress", (e) => { if (e.key === "Enter") inviaMessaggio(); });
 
-// PROFILO FISICO E GRAFICI (Mantenuti come da tua versione con piccoli fix di rendering)
+// PROFILO FISICO E GRAFICI
 function calcolaBMR(peso, altezza, eta, sesso) {
-    if(sesso === 'M') return (10 * peso) + (6.25 * altezza) - (5 * eta) + 5;
-    else return (10 * peso) + (6.25 * altezza) - (5 * eta) - 161;
+    return sesso === 'M' ? (10 * peso) + (6.25 * altezza) - (5 * eta) + 5 : (10 * peso) + (6.25 * altezza) - (5 * eta) - 161;
 }
 
 async function salvaProfilo() {
@@ -180,9 +204,8 @@ async function salvaProfilo() {
 
     const oggi = ottieniData(0);
     const recordOggi = await db.diario.get(oggi) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
-    
     await db.diario.put({ ...recordOggi, data: oggi, peso, bmi, bmr, tdee });
-    disegnaGrafico(); 
+    if(chartInstance || chartFisicoInstance) disegnaGrafico();
 }
 
 async function caricaProfiloInUI() {
@@ -197,12 +220,9 @@ async function caricaProfiloInUI() {
     }
 }
 
-// LOGICA GRAFICI
-let chartInstance = null; 
-let chartFisicoInstance = null; 
-let filtroAttuale = 'settimana'; 
-let metricaAttuale = 'base';
-let metricaFisicaAttuale = 'peso';
+// LOGICA DASHBOARD
+let chartInstance = null, chartFisicoInstance = null; 
+let filtroAttuale = 'settimana', metricaAttuale = 'base', metricaFisicaAttuale = 'peso';
 
 function mostraChat() {
     document.getElementById("chat-box").style.display = "block";
@@ -237,27 +257,28 @@ async function disegnaGrafico() {
     let ds1 = [];
     if (metricaAttuale === 'base') {
         ds1 = [
-            { label: 'Mangiate', data: datiFiltrati.map(d => d.calorieMangiate), borderColor: '#28a745', tension: 0.3 },
+            { label: 'Mangiate', data: datiFiltrati.map(d => d.calorieMangiate || 0), borderColor: '#28a745', tension: 0.3 },
             { label: 'Target', data: datiFiltrati.map(d => (d.tdee || fallbackTDEE) + (d.calorieBruciate || 0)), borderColor: '#007bff', borderDash: [5, 5], tension: 0.3 }
         ];
     } else if (metricaAttuale === 'deficit') {
-        ds1 = [{ label: 'Bilancio', data: datiFiltrati.map(d => d.calorieMangiate - ((d.tdee || fallbackTDEE) + d.calorieBruciate)), borderColor: '#dc3545', tension: 0.3 }];
+        ds1 = [{ label: 'Bilancio', data: datiFiltrati.map(d => (d.calorieMangiate || 0) - ((d.tdee || fallbackTDEE) + (d.calorieBruciate || 0))), borderColor: '#dc3545', tension: 0.3 }];
     } else {
         const m = metricaAttuale === 'carboidrati' ? 'carbo' : metricaAttuale;
-        ds1 = [{ label: metricaAttuale, data: datiFiltrati.map(d => d[m]), borderColor: '#6f42c1', tension: 0.3 }];
+        ds1 = [{ label: metricaAttuale, data: datiFiltrati.map(d => d[m] || 0), borderColor: '#6f42c1', tension: 0.3 }];
     }
 
     const ctx1 = document.getElementById('graficoCalorie').getContext('2d');
     if(chartInstance) chartInstance.destroy(); 
     chartInstance = new Chart(ctx1, { type: 'line', data: { labels, datasets: ds1 } });
 
-    let datiFisici = datiFiltrati.map(d => d[metricaFisicaAttuale]).filter(v => v !== undefined);
-    const labelsFisiche = datiFiltrati.filter(d => d[metricaFisicaAttuale]).map(d => d.data);
-
+    let datiFisici = datiFiltrati.filter(d => d[metricaFisicaAttuale] !== undefined);
     const ctx2 = document.getElementById('graficoFisico').getContext('2d');
     if(chartFisicoInstance) chartFisicoInstance.destroy(); 
     chartFisicoInstance = new Chart(ctx2, { 
         type: 'line', 
-        data: { labels: labelsFisiche, datasets: [{ label: metricaFisicaAttuale.toUpperCase(), data: datiFisici, borderColor: '#e83e8c', fill: false }] } 
+        data: { 
+            labels: datiFisici.map(d => d.data), 
+            datasets: [{ label: metricaFisicaAttuale.toUpperCase(), data: datiFisici.map(d => d[metricaFisicaAttuale]), borderColor: '#e83e8c', fill: false }] 
+        } 
     });
 }
