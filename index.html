@@ -11,41 +11,29 @@
         .menu { display: flex; gap: 10px; margin-bottom: 15px; }
         .menu button { background-color: #007bff; flex: 1; padding: 10px; color: white; border: none; border-radius: 5px; cursor: pointer; }
         .menu button:hover { background-color: #0056b3; }
+        
+        /* CHAT AREA */
         #chat-box { background: white; padding: 15px; border-radius: 10px; height: 400px; overflow-y: auto; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         .input-area { display: flex; gap: 10px; margin-bottom: 10px; }
         input, select { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
         .btn-invia { padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        .btn-invia:hover { background-color: #218838; }
         
+        /* CONFIG AREA SOTTO CHAT */
+        .config-area { background: #eee; padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 0.85em; }
+        .config-area h3 { margin: 0 0 8px 0; font-size: 0.9em; color: #555; }
+        .config-input-group { display: flex; gap: 5px; }
+        .config-input-group input { padding: 6px; font-size: 0.8em; }
+        .btn-save-api { background: #6c757d; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+
+        /* DASHBOARD AREA */
         #dashboard-box { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: none; }
         .titolo-filtri { font-size: 0.9em; color: #555; margin-bottom: 5px; margin-top: 15px; font-weight: bold; }
         .filtri-tempo { display: flex; flex-wrap: wrap; gap: 5px; }
         .filtri-tempo button { flex: 1; padding: 6px; font-size: 0.8em; background-color: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; }
-        
         .profilo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
         
-        .container-reset { 
-            display: flex; 
-            justify-content: center; 
-            gap: 15px; 
-            margin-top: 10px; 
-            padding-top: 10px;
-        }
-        .btn-reset { 
-            background-color: #f8d7da; 
-            color: #721c24; 
-            border: 1px solid #f5c6cb; 
-            padding: 10px 15px; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            font-size: 0.75em;
-            font-weight: bold;
-            transition: 0.3s;
-        }
-        .btn-reset:hover { background-color: #dc3545; color: white; }
-
-        .config-area { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #eee; margin-top: 20px; }
-        .config-area h3 { margin-top: 0; font-size: 1em; }
+        .container-reset { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+        .btn-reset { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 0.75em; font-weight: bold; }
 
         hr { border: 0; border-top: 1px solid #eee; margin: 25px 0; }
     </style>
@@ -59,12 +47,25 @@
         <button onclick="mostraDashboard()">📊 Dashboard</button>
     </div>
     
-    <div id="chat-box">
-        <p><strong>Dietologo:</strong> Ciao! Cosa hai mangiato o fatto oggi?</p>
-    </div>
-    <div class="input-area" id="input-area">
-        <input type="text" id="user-input" placeholder="Scrivi qui...">
-        <button class="btn-invia" onclick="inviaMessaggio()">Invia</button>
+    <div id="chat-section">
+        <div id="chat-box">
+            <p><strong>Dietologo:</strong> Ciao! Cosa hai mangiato o fatto oggi?</p>
+        </div>
+        <div class="input-area" id="input-area">
+            <input type="text" id="user-input" placeholder="Scrivi qui...">
+            <button class="btn-invia" onclick="inviaMessaggio()">Invia</button>
+        </div>
+
+        <div class="config-area">
+            <h3>⚙️ Configurazione API Gemini</h3>
+            <div class="config-input-group">
+                <input type="password" id="api-key-input" placeholder="Incolla API Key qui...">
+                <button class="btn-save-api" onclick="salvaApiKey()">Salva</button>
+            </div>
+            <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #777;">
+                Chiave salvata solo sul tuo iPhone. <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: #007bff;">Prendi chiave gratis</a>
+            </p>
+        </div>
     </div>
 
     <div id="dashboard-box">
@@ -110,24 +111,10 @@
         </div>
         <canvas id="graficoFisico"></canvas>
 
-        <hr>
-
-        <div class="config-area">
-            <h3>Configurazione API</h3>
-            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                <input type="password" id="api-key-input" placeholder="Incolla qui la tua API Key">
-                <button class="btn-invia" onclick="salvaApiKey()" style="background-color: #007bff;">Salva</button>
-            </div>
-            <p style="font-size: 0.7em; color: #666; margin: 0;">
-                Ottieni una chiave gratuita su <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.
-            </p>
-        </div>
-
         <div class="container-reset">
             <button class="btn-reset" onclick="resetDatiGiorno(1)">🗑️ Reset Ieri</button>
             <button class="btn-reset" onclick="resetDatiGiorno(0)">🗑️ Reset Oggi</button>
         </div>
-        <p style="text-align: center; font-size: 0.7em; color: #999; margin-top: 10px;">Attenzione: il reset cancella solo i dati nutrizionali e sportivi.</p>
     </div>
 
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
