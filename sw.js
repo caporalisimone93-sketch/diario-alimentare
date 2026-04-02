@@ -1,4 +1,4 @@
-const CACHE_NAME = 'diet-store-v7'; // incrementa questo numero ad ogni modifica
+const CACHE_NAME = 'diet-store-v8'; // incrementa questo numero ad ogni modifica
 
 self.addEventListener('install', (e) => {
     e.waitUntil(
