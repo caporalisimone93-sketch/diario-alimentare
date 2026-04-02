@@ -7,7 +7,7 @@ if ('serviceWorker' in navigator) {
 
 // CONFIGURAZIONE API (BYOK)
 // Endpoint corretto: rimosso "-latest" che spesso causa problemi di "not found" in v1beta
-const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+const API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent";
 
 function salvaApiKey() {
     const keyInput = document.getElementById('api-key-input');
@@ -132,24 +132,29 @@ DEVI includere a fine risposta questo JSON:
         }]
     };
 
-    // Uso l'API Key nell'header con la capitalizzazione standard
-    const response = await fetch(API_URL, {
+    // Usiamo il metodo più compatibile: la chiave nell'URL query string
+    const response = await fetch(`${API_URL}?key=${apiKey}`, {
         method: "POST",
         headers: { 
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": apiKey 
+            "Content-Type": "application/json"
         },
         body: JSON.stringify(requestBody)
     });
 
     const data = await response.json();
+    
     if (!response.ok) {
-        throw new Error(data.error?.message || 'Errore API Gemini');
+        // Se v1 fallisce per qualche motivo specifico dell'account, proviamo a dare un errore dettagliato
+        console.error("Dettaglio Errore:", data);
+        throw new Error(data.error?.message || 'Errore di connessione al modello');
     }
     
+    if (!data.candidates || data.candidates.length === 0) {
+        throw new Error("L'AI non ha generato una risposta valida.");
+    }
+
     const testoRisposta = data.candidates[0].content.parts[0].text;
 
-    // Estrazione e parsing del JSON
     try {
         const regexJson = /```json([\s\S]*?)```/;
         const match = testoRisposta.match(regexJson);
