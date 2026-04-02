@@ -275,7 +275,8 @@ async function salvaProfilo() {
     } else {
         bmr = 447.6 + (9.2 * peso) + (3.1 * altezza) - (4.3 * eta);
     }
-    const tdee = Math.round(bmr * 1.55); // Attività moderata
+    const fattoreAttivita = parseFloat(document.getElementById('input-attivita').value);
+const tdee = Math.round(bmr * fattoreAttivita);
 
     const oggi = ottieniData(0);
     const r = await db.diario.get(oggi) || { data: oggi, calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
