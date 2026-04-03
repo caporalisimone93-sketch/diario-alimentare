@@ -1,4 +1,4 @@
-const CACHE_NAME = 'diet-store-v3';
+const CACHE_NAME = 'diet-store-v4';
 const FILES_TO_CACHE = [
     'index.html',
     'app.js',
