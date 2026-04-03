@@ -26,10 +26,37 @@ function ottieniApiKey() {
 
 // DATABASE (DEXIE)
 const db = new Dexie("DiarioAlimentareDB");
+
 db.version(3).stores({
     pastiTipici: 'nome, descrizione, calorie, proteine, carboidrati, grassi',
     diario: 'data, calorieMangiate, proteine, carbo, grassi, calorieBruciate'
 });
+
+db.version(4).stores({
+    pastiTipici: 'nome',
+    diario: 'data',
+    pasti: '++id, data, tipo'
+}).upgrade(async tx => {
+    const records = await tx.table('diario').toArray();
+    for (const r of records) {
+        if ((r.calorieMangiate || 0) > 0) {
+            await tx.table('pasti').add({
+                data: r.data,
+                tipo: 'importato',
+                calorie: r.calorieMangiate || 0,
+                proteine: r.proteine || 0,
+                carboidrati: r.carbo || 0,
+                grassi: r.grassi || 0
+            });
+        }
+        await tx.table('diario').update(r.data, {
+            calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0
+        });
+    }
+});
+
+const TIPI_PASTO_SINGOLI = ['colazione', 'pranzo', 'merenda', 'cena'];
+const TIPI_PASTO_TUTTI = [...TIPI_PASTO_SINGOLI, 'spuntino'];
 
 // PROTEZIONE XSS
 function escapeHTML(str) {
@@ -38,7 +65,7 @@ function escapeHTML(str) {
     return p.innerHTML;
 }
 
-// CRONOLOGIA CHAT (in memoria, per contesto Gemini)
+// CRONOLOGIA CHAT
 let cronologiaChat = [];
 const MAX_MESSAGGI_CONTESTO = 10;
 
@@ -49,42 +76,36 @@ function aggiungiACronologia(ruolo, testo) {
     }
 }
 
-// STATO INVIO (anti doppio invio)
+// STATO INVIO
 let invioInCorso = false;
 
 function bloccaInvio() {
     invioInCorso = true;
-    const btn = document.getElementById('btn-invia');
-    const input = document.getElementById('user-input');
-    btn.disabled = true;
-    btn.textContent = '...';
-    input.disabled = true;
+    document.getElementById('btn-invia').disabled = true;
+    document.getElementById('btn-invia').textContent = '...';
+    document.getElementById('user-input').disabled = true;
     document.getElementById('btn-foto').disabled = true;
 }
 
 function sbloccaInvio() {
     invioInCorso = false;
-    const btn = document.getElementById('btn-invia');
-    const input = document.getElementById('user-input');
-    btn.disabled = false;
-    btn.textContent = 'Invia';
-    input.disabled = false;
+    document.getElementById('btn-invia').disabled = false;
+    document.getElementById('btn-invia').textContent = 'Invia';
+    document.getElementById('user-input').disabled = false;
     document.getElementById('btn-foto').disabled = false;
-    input.focus();
+    document.getElementById('user-input').focus();
 }
 
 // GESTIONE FOTO
-let fotoAllegata = null; // { base64, mimeType }
+let fotoAllegata = null;
 
 function anteprimaFoto(input) {
     const file = input.files[0];
     if (!file) return;
-    
     const reader = new FileReader();
     reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
-            // Ridimensiona a max 1024px per lato
             const MAX = 1024;
             let w = img.width, h = img.height;
             if (w > MAX || h > MAX) {
@@ -92,14 +113,10 @@ function anteprimaFoto(input) {
                 else { w = Math.round(w * MAX / h); h = MAX; }
             }
             const canvas = document.createElement('canvas');
-            canvas.width = w;
-            canvas.height = h;
+            canvas.width = w; canvas.height = h;
             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-            
             const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            const base64 = dataUrl.split(',')[1];
-            fotoAllegata = { base64, mimeType: 'image/jpeg' };
-            
+            fotoAllegata = { base64: dataUrl.split(',')[1], mimeType: 'image/jpeg' };
             document.getElementById('anteprima-img').src = dataUrl;
             document.getElementById('anteprima-foto').style.display = 'block';
             document.getElementById('btn-foto').classList.add('ha-foto');
@@ -116,23 +133,7 @@ function rimuoviFoto() {
     document.getElementById('foto-input').value = '';
 }
 
-// RESET DATI
-async function resetDatiGiorno(giorniIndietro) {
-    const dataTarget = ottieniData(giorniIndietro);
-    const confermi = confirm(`Vuoi davvero azzerare i pasti e l'allenamento di ${giorniIndietro === 0 ? 'OGGI' : 'IERI'} (${dataTarget})?`);
-    
-    if (confermi) {
-        const recordEsistente = await db.diario.get(dataTarget);
-        if (recordEsistente) {
-            await db.diario.update(dataTarget, {
-                calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0
-            });
-            alert("Dati resettati!");
-            if (document.getElementById("dashboard-box").style.display === "block") disegnaGrafico();
-        }
-    }
-}
-
+// UTILITÀ DATE
 function ottieniData(giorniIndietro = 0) {
     const d = new Date();
     d.setDate(d.getDate() - giorniIndietro);
@@ -141,8 +142,79 @@ function ottieniData(giorniIndietro = 0) {
 
 async function ottieniTDEEAttuale() {
     const tuttiIDati = await db.diario.orderBy('data').reverse().toArray();
-    const recordConTDEE = tuttiIDati.find(d => d.tdee);
-    return recordConTDEE ? recordConTDEE.tdee : null;
+    const record = tuttiIDati.find(d => d.tdee);
+    return record ? record.tdee : null;
+}
+
+// AGGREGAZIONE PASTI
+async function ottieniPastiGiorno(data) {
+    return await db.pasti.where('data').equals(data).toArray();
+}
+
+function sommaPasti(lista) {
+    return lista.reduce((t, p) => ({
+        calorie: t.calorie + (p.calorie || 0),
+        proteine: t.proteine + (p.proteine || 0),
+        carboidrati: t.carboidrati + (p.carboidrati || 0),
+        grassi: t.grassi + (p.grassi || 0)
+    }), { calorie: 0, proteine: 0, carboidrati: 0, grassi: 0 });
+}
+
+function formattaPastiPerPrompt(lista) {
+    if (lista.length === 0) return 'Nessun pasto registrato.';
+    const righe = [];
+    for (const tipo of [...TIPI_PASTO_TUTTI, 'importato']) {
+        const entries = lista.filter(p => p.tipo === tipo);
+        for (const e of entries) {
+            righe.push(`- ${tipo}: ${e.calorie}kcal P:${e.proteine}g C:${e.carboidrati}g G:${e.grassi}g`);
+        }
+    }
+    return righe.join('\n');
+}
+
+async function ottieniTotaliGiornalieri() {
+    const tuttiIPasti = await db.pasti.toArray();
+    const tuttiIDiario = await db.diario.toArray();
+
+    const perGiorno = {};
+    for (const p of tuttiIPasti) {
+        if (!perGiorno[p.data]) perGiorno[p.data] = { calorie: 0, proteine: 0, carbo: 0, grassi: 0 };
+        perGiorno[p.data].calorie += p.calorie || 0;
+        perGiorno[p.data].proteine += p.proteine || 0;
+        perGiorno[p.data].carbo += p.carboidrati || 0;
+        perGiorno[p.data].grassi += p.grassi || 0;
+    }
+
+    const tutteLeDate = new Set([...Object.keys(perGiorno), ...tuttiIDiario.map(d => d.data)]);
+    const risultato = [];
+    for (const data of tutteLeDate) {
+        const cibo = perGiorno[data] || { calorie: 0, proteine: 0, carbo: 0, grassi: 0 };
+        const diario = tuttiIDiario.find(d => d.data === data) || {};
+        risultato.push({
+            data,
+            calorieMangiate: cibo.calorie,
+            proteine: cibo.proteine,
+            carbo: cibo.carbo,
+            grassi: cibo.grassi,
+            calorieBruciate: diario.calorieBruciate || 0,
+            tdee: diario.tdee, peso: diario.peso, bmi: diario.bmi
+        });
+    }
+    return risultato;
+}
+
+// RESET
+async function resetDatiGiorno(giorniIndietro) {
+    const dataTarget = ottieniData(giorniIndietro);
+    const label = giorniIndietro === 0 ? 'OGGI' : 'IERI';
+    if (!confirm(`Vuoi davvero azzerare tutti i pasti e l'allenamento di ${label} (${dataTarget})?`)) return;
+
+    await db.pasti.where('data').equals(dataTarget).delete();
+    const record = await db.diario.get(dataTarget);
+    if (record) await db.diario.update(dataTarget, { calorieBruciate: 0 });
+
+    alert("Dati resettati!");
+    if (document.getElementById("dashboard-box").style.display === "block") disegnaGrafico();
 }
 
 // LOGICA CHAT
@@ -152,7 +224,6 @@ async function inviaMessaggio() {
     const inputField = document.getElementById("user-input");
     const testoUtente = inputField.value.trim();
     const foto = fotoAllegata;
-    
     if (!testoUtente && !foto) return;
 
     const apiKey = ottieniApiKey();
@@ -162,8 +233,7 @@ async function inviaMessaggio() {
     }
 
     bloccaInvio();
-    
-    // Mostra messaggio utente con eventuale miniatura foto
+
     const chatBox = document.getElementById("chat-box");
     const msgUtente = document.createElement("p");
     let htmlUtente = `<strong>Tu:</strong> `;
@@ -172,11 +242,10 @@ async function inviaMessaggio() {
     else if (foto) htmlUtente += `<em style="color:#999;">foto allegata</em>`;
     msgUtente.innerHTML = htmlUtente;
     chatBox.appendChild(msgUtente);
-    
+
     inputField.value = "";
     rimuoviFoto();
-    
-    // Messaggio placeholder con animazione
+
     const loadingMsg = document.createElement("p");
     loadingMsg.innerHTML = `<strong>Dietologo:</strong> <span class="loading-dots">Sto pensando</span>`;
     chatBox.appendChild(loadingMsg);
@@ -185,29 +254,25 @@ async function inviaMessaggio() {
     try {
         const risultato = await faiDomandaAGemini(testoUtente || "Analizza questa foto", apiKey, foto);
         let html = `<strong>Dietologo:</strong> ${escapeHTML(risultato.testo).replace(/\n/g, "<br>")}`;
-        
-        // Badge conferma registrazione
+
         if (risultato.conferma) {
             const c = risultato.conferma;
-            if (c.kcal || c.bruciate || c.p || c.c || c.g) {
-                const isCorrezione = c.kcal < 0 || c.p < 0 || c.c < 0 || c.g < 0;
+            if (c.calorie || c.bruciate) {
                 const parti = [];
-                if (c.kcal) parti.push(`${c.kcal > 0 ? '+' : ''}${c.kcal} kcal`);
-                if (c.p) parti.push(`P ${c.p > 0 ? '+' : ''}${c.p}g`);
-                if (c.c) parti.push(`C ${c.c > 0 ? '+' : ''}${c.c}g`);
-                if (c.g) parti.push(`G ${c.g > 0 ? '+' : ''}${c.g}g`);
+                if (c.calorie) parti.push(`${c.calorie} kcal`);
+                if (c.p) parti.push(`P ${c.p}g`);
+                if (c.c) parti.push(`C ${c.c}g`);
+                if (c.g) parti.push(`G ${c.g}g`);
                 if (c.bruciate) parti.push(`🏃 -${c.bruciate} kcal`);
-                
                 const giorno = c.data !== ottieniData(0) ? ` (${c.data})` : '';
-                const etichetta = isCorrezione ? '✏️ Corretto' : '✓ Registrato';
-                const classe = isCorrezione ? 'conferma-correzione' : 'conferma-registrazione';
-                html += `<div class="${classe}">${etichetta}${giorno}: ${parti.join(' | ')}</div>`;
+                const tipoLabel = c.tipo ? c.tipo.charAt(0).toUpperCase() + c.tipo.slice(1) : 'Registrato';
+                html += `<div class="conferma-registrazione">✓ ${escapeHTML(tipoLabel)}${giorno}: ${parti.join(' | ')}</div>`;
             }
             if (c.pastoSalvato) {
-                html += `<div class="conferma-pasto-salvato">✓ Pasto "${escapeHTML(c.pastoSalvato)}" salvato nei preferiti</div>`;
+                html += `<div class="conferma-pasto-salvato">✓ "${escapeHTML(c.pastoSalvato)}" salvato nei preferiti</div>`;
             }
         }
-        
+
         loadingMsg.innerHTML = html;
     } catch (error) {
         loadingMsg.innerHTML = `<strong>Errore:</strong> ${escapeHTML(error.message)}`;
@@ -220,67 +285,81 @@ async function inviaMessaggio() {
 async function faiDomandaAGemini(testo, apiKey, foto = null) {
     const dataOggi = ottieniData(0);
     const dataIeri = ottieniData(1);
-    
-    const recordOggi = await db.diario.get(dataOggi) || { calorieMangiate: 0, calorieBruciate: 0 };
-    const recordIeri = await db.diario.get(dataIeri) || { calorieMangiate: 0, calorieBruciate: 0 };
+
+    const pastiOggi = await ottieniPastiGiorno(dataOggi);
+    const pastiIeri = await ottieniPastiGiorno(dataIeri);
+    const totOggi = sommaPasti(pastiOggi);
+    const totIeri = sommaPasti(pastiIeri);
+
+    const recordOggi = await db.diario.get(dataOggi) || {};
+    const recordIeri = await db.diario.get(dataIeri) || {};
+
     const pastiSalvati = await db.pastiTipici.toArray();
-    
     let memoriaPasti = pastiSalvati.length > 0
-        ? "Pasti salvati dall'utente: " + pastiSalvati.map(p => 
+        ? "Alimenti/pasti salvati: " + pastiSalvati.map(p =>
             `"${p.nome}" = ${p.descrizione} (${p.calorie}kcal, P:${p.proteine}g C:${p.carboidrati}g G:${p.grassi}g)`
           ).join("; ")
-        : "L'utente non ha ancora salvato nessun pasto tipico.";
-    
-    const tdeeAttuale = await ottieniTDEEAttuale();
-    const tdeeInfo = tdeeAttuale 
-        ? `Fabbisogno TDEE: ${Math.round(tdeeAttuale)} kcal.` 
-        : "TDEE non ancora configurato (l'utente non ha compilato il profilo fisico).";
+        : "Nessun alimento/pasto salvato.";
 
-    // Storico ultimi 30 giorni per domande analitiche
+    const tdeeAttuale = await ottieniTDEEAttuale();
+    const tdeeInfo = tdeeAttuale ? `TDEE: ${Math.round(tdeeAttuale)} kcal.` : "TDEE non configurato.";
+
+    const totali = await ottieniTotaliGiornalieri();
     const trentaGiorniFa = new Date();
     trentaGiorniFa.setDate(trentaGiorniFa.getDate() - 30);
-    const storicoDiario = (await db.diario.toArray())
+    const storico = totali
         .filter(d => new Date(d.data) >= trentaGiorniFa)
         .sort((a, b) => a.data.localeCompare(b.data))
-        .map(d => `${d.data}: ${d.calorieMangiate||0}kcal P:${d.proteine||0}g C:${d.carbo||0}g G:${d.grassi||0}g bruciato:${d.calorieBruciate||0}kcal${d.tdee ? ' TDEE:'+d.tdee : ''}${d.peso ? ' peso:'+d.peso+'kg' : ''}`)
+        .map(d => `${d.data}: ${d.calorieMangiate}kcal P:${d.proteine}g C:${d.carbo}g G:${d.grassi}g bruciato:${d.calorieBruciate}kcal${d.tdee ? ' TDEE:'+d.tdee : ''}${d.peso ? ' peso:'+d.peso+'kg' : ''}`)
         .join('\n');
 
-    const systemInstruction = `Sei un dietologo sintetico in un'app di tracking calorico. Analizza l'input dell'utente.
+    const systemInstruction = `Sei un dietologo sintetico in un'app di tracking calorico.
 
-REGOLE RIGIDE:
+REGOLE:
 1. Capisci se l'utente parla di OGGI (${dataOggi}) o di IERI (${dataIeri}).
-2. Rispondi SOLO con l'analisi del nuovo pasto/allenamento e un commento tecnico brevissimo.
-3. Dati già salvati: OGGI = ${recordOggi.calorieMangiate} kcal mangiate / ${recordOggi.calorieBruciate} kcal bruciate. IERI = ${recordIeri.calorieMangiate} kcal mangiate / ${recordIeri.calorieBruciate} kcal bruciate.
-4. ${memoriaPasti}
-5. ${tdeeInfo}
+2. Rispondi con analisi del pasto/allenamento e commento tecnico brevissimo.
+3. ${memoriaPasti}
+4. ${tdeeInfo}
 
-STORICO DIARIO (ultimi 30 giorni, usalo per rispondere a domande analitiche come medie, totali, trend):
-${storicoDiario || 'Nessun dato registrato.'}
+PASTI REGISTRATI OGGI (${dataOggi}):
+${formattaPastiPerPrompt(pastiOggi)}
+Totale oggi: ${totOggi.calorie} kcal mangiate | Bruciato: ${recordOggi.calorieBruciate || 0} kcal
 
-RISPOSTE ANALITICHE: quando l'utente chiede medie, totali o trend, dai SOLO il risultato finale con il periodo di riferimento. Niente elenchi giorno per giorno, niente passaggi intermedi, niente formule. Esempio: "Questa settimana hai un deficit totale di 469 kcal su 2 giorni tracciati. Media proteine: 116g/giorno."
+PASTI REGISTRATI IERI (${dataIeri}):
+${formattaPastiPerPrompt(pastiIeri)}
+Totale ieri: ${totIeri.calorie} kcal mangiate | Bruciato: ${recordIeri.calorieBruciate || 0} kcal
 
-PASTI SALVATI:
-- Se l'utente menziona il NOME di un pasto salvato (es. "ho mangiato la solita colazione"), USA i valori nutrizionali salvati, NON stimare da zero.
-- Se l'utente chiede di SALVARE un alimento o pasto (es. "salva come pranzo classico", "salvalo come X"), aggiungi il campo "salva_pasto" nel JSON con nome e descrizione.
-- COMPOSIZIONE: se l'utente compone un pasto da alimenti già salvati (es. "salva come colazione: yogurt Fage + crema nocciole + cereali"), DEVI sommare i valori dei singoli alimenti salvati, NON stimare. Usa i valori esatti dal database.
-- VALORI PARZIALI: se l'utente fornisce solo alcuni valori (es. "salva questo yogurt, ha 120 kcal e 10g proteine"), usa quelli forniti e stima SOLO i macro mancanti.
-- FOTO ETICHETTA + SALVATAGGIO: se l'utente manda la foto di un'etichetta e chiede di salvare, estrai i valori esatti dall'etichetta.
-- AGGIORNAMENTO: se l'utente chiede di aggiornare un alimento già salvato (es. "aggiorna lo Yogurt Fage, in realtà ha 97 kcal"), salva con lo stesso nome — il vecchio viene sovrascritto automaticamente. Nella risposta conferma i vecchi e i nuovi valori.
-- SOLO SALVATAGGIO: se l'utente vuole solo salvare un prodotto senza registrarlo nel diario di oggi (es. "salva questo prodotto ma non l'ho mangiato oggi"), metti tutti i valori nutrizionali a 0 nel JSON principale e usa salva_pasto per salvare i valori reali.
+STORICO (ultimi 30 giorni):
+${storico || 'Nessun dato.'}
+
+RISPOSTE ANALITICHE: per domande su totali, medie o trend, USA SEMPRE i dati registrati qui sopra. NON ricalcolare. Dai solo il risultato finale.
+
+TIPO DI PASTO (IMPORTANTE):
+Ogni registrazione DEVE avere un tipo_pasto: "colazione", "pranzo", "merenda", "cena" o "spuntino".
+- Deduci dal contesto ("stamattina"→colazione, "a pranzo"→pranzo, "per merenda"→merenda, "stasera"/"a cena"→cena).
+- Se non è chiaro, CHIEDI all'utente.
+- colazione/pranzo/merenda/cena: UNA SOLA VOLTA al giorno. Se già presente, i nuovi valori SOSTITUISCONO i vecchi.
+- spuntino: può essere registrato PIÙ VOLTE, ogni spuntino si AGGIUNGE.
+
+ALIMENTI/PASTI SALVATI:
+- Se l'utente menziona un alimento salvato, USA i valori salvati.
+- VALORI PER 100g: se la descrizione dice "per 100g", chiedi quantità o calcola proporzionalmente.
+- COMPOSIZIONE da salvati: SOMMA i valori esatti, non stimare.
+- SALVATAGGIO: aggiungi "salva_pasto" nel JSON.
+- AGGIORNAMENTO: salva con stesso nome per sovrascrivere.
+- SOLO SALVATAGGIO senza registrare: metti valori a 0 nel JSON principale.
 
 CORREZIONI:
-- Se l'utente corregge un valore precedente (es. "no erano 400 kcal", "le proteine erano 30g", "togli l'ultimo pasto"), calcola la DIFFERENZA rispetto a quanto avevi registrato prima e usa valori NEGATIVI nel JSON.
-- Esempio: se avevi registrato 500 kcal e l'utente dice "erano 400", metti calorie_mangiate: -100.
-- Per cancellare un pasto intero, metti i valori negativi corrispondenti a quel pasto.
-- Conferma brevemente la correzione nella risposta testuale.
+- colazione/pranzo/merenda/cena: basta ridire il pasto, viene sostituito.
+- spuntino: usa valori negativi per togliere.
+- esercizio: usa calorie_bruciate negative.
 
-IMPORTANTE: i valori nel JSON sono sempre DELTA (differenze da sommare al totale giornaliero). Per nuovi pasti sono positivi, per correzioni possono essere negativi.
-
-Formato JSON obbligatorio alla fine della risposta:
+Formato JSON alla fine della risposta:
 \`\`\`json
 {
   "data_riferimento": "${dataOggi}",
-  "calorie_mangiate": 0,
+  "tipo_pasto": "pranzo",
+  "calorie": 0,
   "proteine": 0,
   "carboidrati": 0,
   "grassi": 0,
@@ -289,42 +368,25 @@ Formato JSON obbligatorio alla fine della risposta:
 }
 \`\`\`
 
-Se l'utente vuole salvare un pasto, il campo salva_pasto diventa:
+Per salvare un alimento:
 \`\`\`json
-"salva_pasto": {
-  "nome": "nome del pasto",
-  "descrizione": "descrizione testuale degli alimenti",
-  "calorie": 0,
-  "proteine": 0,
-  "carboidrati": 0,
-  "grassi": 0
-}
+"salva_pasto": { "nome": "nome", "descrizione": "desc", "calorie": 0, "proteine": 0, "carboidrati": 0, "grassi": 0 }
 \`\`\`
-I valori dentro salva_pasto sono quelli REALI dell'alimento/pasto da salvare nel database. Normalmente coincidono con i valori nel JSON principale, ma nel caso "salva senza registrare nel diario" il JSON principale ha valori 0 mentre salva_pasto ha i valori reali.
 
-Se il messaggio dell'utente è una domanda generica, una domanda analitica sui dati (medie, totali, deficit, trend), conversazione, o non riguarda un nuovo pasto/allenamento da registrare, rispondi normalmente SENZA blocco JSON.
+Se il messaggio è una domanda generica o analitica, rispondi SENZA JSON.
 
-FOTO: l'utente può allegare foto di etichette nutrizionali o di alimenti. Se ricevi un'immagine, leggila attentamente ed estrai i valori nutrizionali. Per le etichette, usa i valori esatti riportati. Per foto di cibo, stima al meglio.`;
+FOTO: leggi immagini di etichette (valori esatti) o cibo (stima).`;
 
-    // Costruisci le parts del messaggio utente (testo + eventuale immagine)
     const userParts = [];
-    if (foto) {
-        userParts.push({ inline_data: { mime_type: foto.mimeType, data: foto.base64 } });
-    }
+    if (foto) userParts.push({ inline_data: { mime_type: foto.mimeType, data: foto.base64 } });
     userParts.push({ text: testo });
 
-    // Nella cronologia salva solo il testo (no base64)
     aggiungiACronologia("user", foto ? `[foto allegata] ${testo}` : testo);
 
-    // Costruisci contents: cronologia precedente + messaggio corrente con immagine
     const contenutiPrecedenti = cronologiaChat.slice(0, -1);
-    const messaggioCorrente = { role: "user", parts: userParts };
-
     const requestBody = {
-        system_instruction: {
-            parts: [{ text: systemInstruction }]
-        },
-        contents: [...contenutiPrecedenti, messaggioCorrente]
+        system_instruction: { parts: [{ text: systemInstruction }] },
+        contents: [...contenutiPrecedenti, { role: "user", parts: userParts }]
     };
 
     const response = await fetch(`${API_URL}?key=${apiKey}`, {
@@ -335,101 +397,106 @@ FOTO: l'utente può allegare foto di etichette nutrizionali o di alimenti. Se ri
 
     const data = await response.json();
     if (!response.ok) throw new Error(data.error?.message || 'Errore API');
-    
+
     const testoRisposta = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!testoRisposta) throw new Error('Risposta vuota o bloccata dai filtri di sicurezza.');
 
-    // Aggiungi risposta alla cronologia
     aggiungiACronologia("model", testoRisposta);
 
-    // Parsing JSON dalla risposta
     let conferma = null;
     try {
         const jsonMatch = testoRisposta.match(/```(?:json|JSON)?\s*\n?([\s\S]*?)```/);
         if (jsonMatch) {
-            const datiNuovi = JSON.parse(jsonMatch[1].trim());
-            
-            // Salva nel diario se ci sono dati nutrizionali o allenamento
-            if (datiNuovi.calorie_mangiate || datiNuovi.calorie_bruciate || datiNuovi.proteine || datiNuovi.carboidrati || datiNuovi.grassi) {
-                await aggiornaDiario(datiNuovi);
-                conferma = { 
-                    kcal: datiNuovi.calorie_mangiate || 0,
-                    p: datiNuovi.proteine || 0,
-                    c: datiNuovi.carboidrati || 0,
-                    g: datiNuovi.grassi || 0,
-                    bruciate: datiNuovi.calorie_bruciate || 0,
-                    data: datiNuovi.data_riferimento || ottieniData(0)
+            const dati = JSON.parse(jsonMatch[1].trim());
+            const tipoPasto = (dati.tipo_pasto || '').toLowerCase().trim();
+            const dataRif = dati.data_riferimento || dataOggi;
+
+            if (dati.calorie || dati.proteine || dati.carboidrati || dati.grassi) {
+                await registraPasto(dataRif, tipoPasto, dati);
+                conferma = {
+                    calorie: dati.calorie || 0, p: dati.proteine || 0,
+                    c: dati.carboidrati || 0, g: dati.grassi || 0,
+                    bruciate: 0, data: dataRif, tipo: tipoPasto
                 };
             }
-            
-            // Salva pasto tipico se richiesto
-            if (datiNuovi.salva_pasto && datiNuovi.salva_pasto.nome) {
-                const sp = datiNuovi.salva_pasto;
+
+            if (dati.calorie_bruciate) {
+                await registraEsercizio(dataRif, dati.calorie_bruciate);
+                conferma = conferma || { data: dataRif };
+                conferma.bruciate = dati.calorie_bruciate;
+            }
+
+            if (dati.salva_pasto && dati.salva_pasto.nome) {
+                const sp = dati.salva_pasto;
                 await salvaPastoTipico(
-                    sp.nome,
-                    sp.descrizione || '',
-                    sp.calorie || datiNuovi.calorie_mangiate || 0,
-                    sp.proteine || datiNuovi.proteine || 0,
-                    sp.carboidrati || datiNuovi.carboidrati || 0,
-                    sp.grassi || datiNuovi.grassi || 0
+                    sp.nome, sp.descrizione || '',
+                    sp.calorie || dati.calorie || 0, sp.proteine || dati.proteine || 0,
+                    sp.carboidrati || dati.carboidrati || 0, sp.grassi || dati.grassi || 0
                 );
                 conferma = conferma || {};
-                conferma.pastoSalvato = datiNuovi.salva_pasto.nome;
+                conferma.pastoSalvato = sp.nome;
             }
         }
-    } catch(e) { console.error("Errore parsing JSON dalla risposta:", e); }
+    } catch (e) { console.error("Errore parsing JSON:", e); }
 
-    // Restituisci testo + dati conferma
     const testoPulito = testoRisposta.replace(/```(?:json|JSON)?\s*\n?[\s\S]*?```/g, '').trim();
     return { testo: testoPulito, conferma };
 }
 
-async function aggiornaDiario(datiNuovi) {
-    const dataTarget = datiNuovi.data_riferimento || ottieniData(0);
-    const recordTarget = await db.diario.get(dataTarget) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
+// REGISTRAZIONE PASTO
+async function registraPasto(data, tipo, dati) {
+    const pasto = {
+        data,
+        tipo: tipo || 'spuntino',
+        calorie: dati.calorie || 0,
+        proteine: dati.proteine || 0,
+        carboidrati: dati.carboidrati || 0,
+        grassi: dati.grassi || 0
+    };
 
+    if (TIPI_PASTO_SINGOLI.includes(pasto.tipo)) {
+        // Colazione/pranzo/merenda/cena: cancella il vecchio, metti il nuovo
+        await db.pasti.where({ data, tipo: pasto.tipo }).delete();
+        pasto.calorie = Math.max(0, pasto.calorie);
+        pasto.proteine = Math.max(0, pasto.proteine);
+        pasto.carboidrati = Math.max(0, pasto.carboidrati);
+        pasto.grassi = Math.max(0, pasto.grassi);
+    }
+
+    await db.pasti.add(pasto);
+}
+
+// REGISTRAZIONE ESERCIZIO
+async function registraEsercizio(data, calorieBruciate) {
+    const record = await db.diario.get(data) || {};
     await db.diario.put({
-        ...recordTarget,
-        data: dataTarget,
-        calorieMangiate: Math.max(0, (recordTarget.calorieMangiate || 0) + (datiNuovi.calorie_mangiate || 0)),
-        proteine: Math.max(0, (recordTarget.proteine || 0) + (datiNuovi.proteine || 0)),
-        carbo: Math.max(0, (recordTarget.carbo || 0) + (datiNuovi.carboidrati || 0)),
-        grassi: Math.max(0, (recordTarget.grassi || 0) + (datiNuovi.grassi || 0)),
-        calorieBruciate: Math.max(0, (recordTarget.calorieBruciate || 0) + (datiNuovi.calorie_bruciate || 0))
+        ...record, data,
+        calorieBruciate: Math.max(0, (record.calorieBruciate || 0) + calorieBruciate)
     });
 }
 
-// PASTI SALVATI
+// PASTI SALVATI (database alimenti)
 async function salvaPastoTipico(nome, descrizione, calorie, proteine, carboidrati, grassi) {
-    const nomeNorm = nome.toLowerCase().trim();
     await db.pastiTipici.put({
-        nome: nomeNorm,
-        descrizione: descrizione,
-        calorie: calorie,
-        proteine: proteine,
-        carboidrati: carboidrati,
-        grassi: grassi
+        nome: nome.toLowerCase().trim(), descrizione, calorie, proteine, carboidrati, grassi
     });
-    console.log(`Pasto "${nomeNorm}" salvato!`);
 }
 
 async function eliminaPastoTipico(nome) {
-    const conferma = confirm(`Eliminare il pasto "${nome}"?`);
-    if (conferma) {
-        await db.pastiTipici.delete(nome);
-        caricaListaPasti();
-    }
+    if (!confirm(`Eliminare "${nome}"?`)) return;
+    await db.pastiTipici.delete(nome);
+    caricaListaPasti();
 }
 
 async function caricaListaPasti() {
     const container = document.getElementById('lista-pasti-salvati');
     const pasti = await db.pastiTipici.toArray();
-    
+
     if (pasti.length === 0) {
         container.innerHTML = '<div class="nessun-pasto">Nessun pasto salvato.<br>Usa la chat per aggiungerne!</div>';
         return;
     }
-    
+
     container.innerHTML = '';
     pasti.forEach(p => {
         const card = document.createElement('div');
@@ -450,16 +517,8 @@ async function caricaListaPasti() {
     });
 }
 
-function aggiungiMessaggio(m, t) {
-    const c = document.getElementById("chat-box");
-    const p = document.createElement("p");
-    p.innerHTML = `<strong>${m}:</strong> ${escapeHTML(t).replace(/\n/g, "<br>")}`;
-    c.appendChild(p);
-    c.scrollTop = c.scrollHeight;
-}
-
-document.getElementById("user-input").addEventListener("keypress", (e) => { 
-    if (e.key === "Enter" && !invioInCorso) inviaMessaggio(); 
+document.getElementById("user-input").addEventListener("keypress", (e) => {
+    if (e.key === "Enter" && !invioInCorso) inviaMessaggio();
 });
 
 // PROFILO FISICO
@@ -491,8 +550,8 @@ async function salvaProfilo() {
         `BMI: <strong>${bmi.toFixed(1)}</strong> | TDEE stimato: <strong>${tdee} kcal</strong>`;
 
     const oggi = ottieniData(0);
-    const recordOggi = await db.diario.get(oggi) || { calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 };
-    await db.diario.put({ ...recordOggi, data: oggi, peso, bmi: parseFloat(bmi.toFixed(1)), bmr, tdee });
+    const record = await db.diario.get(oggi) || {};
+    await db.diario.put({ ...record, data: oggi, peso, bmi: parseFloat(bmi.toFixed(1)), bmr, tdee });
 
     if (chartInstance || chartFisicoInstance) disegnaGrafico();
 }
@@ -501,8 +560,8 @@ async function caricaProfiloInUI() {
     document.getElementById('input-altezza').value = localStorage.getItem('profilo_altezza') || '';
     document.getElementById('input-eta').value = localStorage.getItem('profilo_eta') || '';
     document.getElementById('input-sesso').value = localStorage.getItem('profilo_sesso') || 'M';
-    const fattoreSalvato = localStorage.getItem('profilo_attivita');
-    if (fattoreSalvato) document.getElementById('input-attivita').value = fattoreSalvato;
+    const f = localStorage.getItem('profilo_attivita');
+    if (f) document.getElementById('input-attivita').value = f;
 
     const tutti = await db.diario.orderBy('data').reverse().toArray();
     const u = tutti.find(d => d.peso);
@@ -514,9 +573,9 @@ async function caricaProfiloInUI() {
 }
 
 // NAVIGAZIONE
-function aggiornaMenu(idAttivo) {
+function aggiornaMenu(id) {
     document.querySelectorAll('.menu button').forEach(b => b.classList.remove('attivo'));
-    document.getElementById(idAttivo).classList.add('attivo');
+    document.getElementById(id).classList.add('attivo');
 }
 
 function mostraChat() {
@@ -547,33 +606,25 @@ function mostraPastiSalvati() {
 let chartInstance = null, chartFisicoInstance = null;
 let filtroAttuale = 'settimana', metricaAttuale = 'base', metricaFisicaAttuale = 'peso';
 
-function setFiltroAttivo(contenitore, bottone) {
-    // Rimuovi lo stile attivo solo dai bottoni con bg default (non quelli con colore custom)
-    contenitore.querySelectorAll('button').forEach(b => {
-        if (!b.style.backgroundColor) b.classList.remove('attivo');
-    });
-    if (!bottone.style.backgroundColor) bottone.classList.add('attivo');
-}
-
-function cambiaFiltro(n, btn) { 
-    filtroAttuale = n; 
+function cambiaFiltro(n, btn) {
+    filtroAttuale = n;
     document.querySelectorAll('#filtri-intervallo button').forEach(b => b.classList.remove('attivo'));
     if (btn) btn.classList.add('attivo');
-    disegnaGrafico(); 
+    disegnaGrafico();
 }
 
-function cambiaMetrica(n, btn) { 
-    metricaAttuale = n; 
+function cambiaMetrica(n, btn) {
+    metricaAttuale = n;
     document.querySelectorAll('#filtri-metriche button').forEach(b => b.classList.remove('attivo'));
     if (btn) btn.classList.add('attivo');
-    disegnaGrafico(); 
+    disegnaGrafico();
 }
 
-function cambiaMetricaFisica(n, btn) { 
-    metricaFisicaAttuale = n; 
+function cambiaMetricaFisica(n, btn) {
+    metricaFisicaAttuale = n;
     document.querySelectorAll('#filtri-fisico button').forEach(b => b.classList.remove('attivo'));
     if (btn) btn.classList.add('attivo');
-    disegnaGrafico(); 
+    disegnaGrafico();
 }
 
 async function disegnaGrafico() {
@@ -582,7 +633,7 @@ async function disegnaGrafico() {
     if (filtroAttuale === 'settimana') dataInizio.setDate(oggi.getDate() - 7);
     else if (filtroAttuale === 'mese') dataInizio.setMonth(oggi.getMonth() - 1);
 
-    const tuttiIDati = await db.diario.toArray();
+    const tuttiIDati = await ottieniTotaliGiornalieri();
     const datiFiltrati = tuttiIDati
         .filter(d => new Date(d.data) >= dataInizio)
         .sort((a, b) => new Date(a.data) - new Date(b.data));
@@ -593,105 +644,47 @@ async function disegnaGrafico() {
     let ds1 = [];
     if (metricaAttuale === 'base') {
         ds1 = [
-            {
-                label: 'Calorie mangiate',
-                data: datiFiltrati.map(d => d.calorieMangiate || 0),
-                borderColor: '#28a745',
-                backgroundColor: 'rgba(40,167,69,0.1)',
-                tension: 0.3,
-                fill: true
-            },
-            {
-                label: 'Target TDEE',
-                data: datiFiltrati.map(d => (d.tdee || fallbackTDEE) + (d.calorieBruciate || 0)),
-                borderColor: '#007bff',
-                borderDash: [5, 5],
-                tension: 0.3,
-                fill: false
-            }
+            { label: 'Calorie mangiate', data: datiFiltrati.map(d => d.calorieMangiate || 0), borderColor: '#28a745', backgroundColor: 'rgba(40,167,69,0.1)', tension: 0.3, fill: true },
+            { label: 'Target TDEE', data: datiFiltrati.map(d => (d.tdee || fallbackTDEE) + (d.calorieBruciate || 0)), borderColor: '#007bff', borderDash: [5, 5], tension: 0.3, fill: false }
         ];
     } else if (metricaAttuale === 'deficit') {
-        ds1 = [{
-            label: 'Bilancio calorico',
-            data: datiFiltrati.map(d => (d.calorieMangiate || 0) - ((d.tdee || fallbackTDEE) + (d.calorieBruciate || 0))),
-            borderColor: '#dc3545',
-            backgroundColor: 'rgba(220,53,69,0.1)',
-            tension: 0.3,
-            fill: true
-        }];
+        ds1 = [{ label: 'Bilancio calorico', data: datiFiltrati.map(d => (d.calorieMangiate || 0) - ((d.tdee || fallbackTDEE) + (d.calorieBruciate || 0))), borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.1)', tension: 0.3, fill: true }];
     } else {
         const chiave = metricaAttuale === 'carboidrati' ? 'carbo' : metricaAttuale;
-        ds1 = [{
-            label: metricaAttuale.charAt(0).toUpperCase() + metricaAttuale.slice(1) + ' (g)',
-            data: datiFiltrati.map(d => d[chiave] || 0),
-            borderColor: '#6f42c1',
-            backgroundColor: 'rgba(111,66,193,0.1)',
-            tension: 0.3,
-            fill: true
-        }];
+        ds1 = [{ label: metricaAttuale.charAt(0).toUpperCase() + metricaAttuale.slice(1) + ' (g)', data: datiFiltrati.map(d => d[chiave] || 0), borderColor: '#6f42c1', backgroundColor: 'rgba(111,66,193,0.1)', tension: 0.3, fill: true }];
 
-        // Linea consigliata macro (se profilo disponibile)
         const ultimoPeso = [...tuttiIDati].reverse().find(d => d.peso);
         if (ultimoPeso && fallbackTDEE) {
             const peso = ultimoPeso.peso;
             const fattore = parseFloat(localStorage.getItem('profilo_attivita')) || 1.55;
-            let valoreConsigliato = null;
-            let etichetta = '';
+            let val = null, label = '';
 
             if (metricaAttuale === 'proteine') {
-                // Da 0.8g/kg (sedentario) a 2.0g/kg (molto attivo)
-                const gPerKg = fattore <= 1.2 ? 0.8 : fattore <= 1.375 ? 1.2 : fattore <= 1.55 ? 1.6 : 2.0;
-                valoreConsigliato = Math.round(peso * gPerKg);
-                etichetta = `Consigliato (~${gPerKg}g/kg)`;
+                const g = fattore <= 1.2 ? 0.8 : fattore <= 1.375 ? 1.2 : fattore <= 1.55 ? 1.6 : 2.0;
+                val = Math.round(peso * g);
+                label = `Consigliato (~${g}g/kg)`;
             } else if (metricaAttuale === 'carboidrati') {
-                // ~50% delle calorie / 4 kcal per grammo
-                valoreConsigliato = Math.round(fallbackTDEE * 0.50 / 4);
-                etichetta = 'Consigliato (~50% kcal)';
+                val = Math.round(fallbackTDEE * 0.50 / 4);
+                label = 'Consigliato (~50% kcal)';
             } else if (metricaAttuale === 'grassi') {
-                // ~25% delle calorie / 9 kcal per grammo
-                valoreConsigliato = Math.round(fallbackTDEE * 0.25 / 9);
-                etichetta = 'Consigliato (~25% kcal)';
+                val = Math.round(fallbackTDEE * 0.25 / 9);
+                label = 'Consigliato (~25% kcal)';
             }
 
-            if (valoreConsigliato) {
-                ds1.push({
-                    label: etichetta,
-                    data: datiFiltrati.map(() => valoreConsigliato),
-                    borderColor: '#007bff',
-                    borderDash: [5, 5],
-                    tension: 0.3,
-                    fill: false,
-                    pointRadius: 0
-                });
-            }
+            if (val) ds1.push({ label, data: datiFiltrati.map(() => val), borderColor: '#007bff', borderDash: [5, 5], tension: 0.3, fill: false, pointRadius: 0 });
         }
     }
 
     const ctx1 = document.getElementById('graficoCalorie').getContext('2d');
     if (chartInstance) chartInstance.destroy();
-    chartInstance = new Chart(ctx1, {
-        type: 'line',
-        data: { labels, datasets: ds1 },
-        options: { responsive: true, plugins: { legend: { display: true } } }
-    });
+    chartInstance = new Chart(ctx1, { type: 'line', data: { labels, datasets: ds1 }, options: { responsive: true, plugins: { legend: { display: true } } } });
 
-    // GRAFICO FISICO
     const datiFisici = datiFiltrati.filter(d => d[metricaFisicaAttuale] !== undefined);
     const ctx2 = document.getElementById('graficoFisico').getContext('2d');
     if (chartFisicoInstance) chartFisicoInstance.destroy();
     chartFisicoInstance = new Chart(ctx2, {
         type: 'line',
-        data: {
-            labels: datiFisici.map(d => d.data),
-            datasets: [{
-                label: metricaFisicaAttuale === 'peso' ? 'Peso (kg)' : 'BMI',
-                data: datiFisici.map(d => d[metricaFisicaAttuale]),
-                borderColor: metricaFisicaAttuale === 'peso' ? '#e83e8c' : '#6f42c1',
-                backgroundColor: metricaFisicaAttuale === 'peso' ? 'rgba(232,62,140,0.1)' : 'rgba(111,66,193,0.1)',
-                fill: true,
-                tension: 0.3
-            }]
-        },
+        data: { labels: datiFisici.map(d => d.data), datasets: [{ label: metricaFisicaAttuale === 'peso' ? 'Peso (kg)' : 'BMI', data: datiFisici.map(d => d[metricaFisicaAttuale]), borderColor: metricaFisicaAttuale === 'peso' ? '#e83e8c' : '#6f42c1', backgroundColor: metricaFisicaAttuale === 'peso' ? 'rgba(232,62,140,0.1)' : 'rgba(111,66,193,0.1)', fill: true, tension: 0.3 }] },
         options: { responsive: true }
     });
 }
@@ -699,14 +692,12 @@ async function disegnaGrafico() {
 // EXPORT / IMPORT
 async function esportaDati() {
     try {
-        const diario = await db.diario.toArray();
-        const pasti = await db.pastiTipici.toArray();
-        
         const backup = {
-            versione: 1,
+            versione: 2,
             dataExport: new Date().toISOString(),
-            diario,
-            pastiTipici: pasti,
+            diario: await db.diario.toArray(),
+            pasti: await db.pasti.toArray(),
+            pastiTipici: await db.pastiTipici.toArray(),
             profilo: {
                 altezza: localStorage.getItem('profilo_altezza'),
                 eta: localStorage.getItem('profilo_eta'),
@@ -714,57 +705,56 @@ async function esportaDati() {
                 attivita: localStorage.getItem('profilo_attivita')
             }
         };
-        
+
         const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
+        a.href = URL.createObjectURL(blob);
         a.download = `dietologo-backup-${ottieniData(0)}.json`;
         a.click();
-        URL.revokeObjectURL(url);
-        
-        document.getElementById('stato-backup').textContent = `✓ Backup esportato (${diario.length} giorni, ${pasti.length} pasti)`;
-    } catch (e) {
-        alert('Errore durante l\'export: ' + e.message);
-    }
+        URL.revokeObjectURL(a.href);
+
+        document.getElementById('stato-backup').textContent = `✓ Backup esportato (${backup.pasti.length} pasti, ${backup.pastiTipici.length} alimenti)`;
+    } catch (e) { alert('Errore export: ' + e.message); }
 }
 
 async function importaDati(input) {
     const file = input.files[0];
     if (!file) return;
-    
-    const conferma = confirm('L\'importazione sovrascriverà i dati esistenti con quelli del backup. Continuare?');
-    if (!conferma) { input.value = ''; return; }
-    
+    if (!confirm('L\'importazione sovrascriverà i dati esistenti. Continuare?')) { input.value = ''; return; }
+
     try {
-        const testo = await file.text();
-        const backup = JSON.parse(testo);
-        
-        if (!backup.diario || !backup.pastiTipici) {
-            throw new Error('File non valido: mancano le tabelle diario o pastiTipici.');
+        const backup = JSON.parse(await file.text());
+
+        if (backup.diario) {
+            await db.diario.clear();
+            await db.diario.bulkPut(backup.diario);
         }
-        
-        // Ripristina diario
-        await db.diario.clear();
-        if (backup.diario.length > 0) await db.diario.bulkPut(backup.diario);
-        
-        // Ripristina pasti
-        await db.pastiTipici.clear();
-        if (backup.pastiTipici.length > 0) await db.pastiTipici.bulkPut(backup.pastiTipici);
-        
-        // Ripristina profilo
+
+        await db.pasti.clear();
+        if (backup.versione >= 2 && backup.pasti) {
+            await db.pasti.bulkPut(backup.pasti);
+        } else if (backup.diario) {
+            for (const r of backup.diario) {
+                if ((r.calorieMangiate || 0) > 0) {
+                    await db.pasti.add({ data: r.data, tipo: 'importato', calorie: r.calorieMangiate || 0, proteine: r.proteine || 0, carboidrati: r.carbo || 0, grassi: r.grassi || 0 });
+                }
+            }
+        }
+
+        if (backup.pastiTipici) {
+            await db.pastiTipici.clear();
+            await db.pastiTipici.bulkPut(backup.pastiTipici);
+        }
+
         if (backup.profilo) {
-            if (backup.profilo.altezza) localStorage.setItem('profilo_altezza', backup.profilo.altezza);
-            if (backup.profilo.eta) localStorage.setItem('profilo_eta', backup.profilo.eta);
-            if (backup.profilo.sesso) localStorage.setItem('profilo_sesso', backup.profilo.sesso);
-            if (backup.profilo.attivita) localStorage.setItem('profilo_attivita', backup.profilo.attivita);
+            for (const [k, v] of Object.entries(backup.profilo)) {
+                if (v) localStorage.setItem('profilo_' + k, v);
+            }
         }
-        
-        document.getElementById('stato-backup').textContent = `✓ Importati ${backup.diario.length} giorni e ${backup.pastiTipici.length} pasti`;
+
+        document.getElementById('stato-backup').textContent = `✓ Importati ${await db.pasti.count()} pasti, ${await db.pastiTipici.count()} alimenti`;
         caricaProfiloInUI();
         disegnaGrafico();
-    } catch (e) {
-        alert('Errore durante l\'import: ' + e.message);
-    }
+    } catch (e) { alert('Errore import: ' + e.message); }
     input.value = '';
 }
