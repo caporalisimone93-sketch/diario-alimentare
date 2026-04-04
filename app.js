@@ -697,6 +697,12 @@ async function disegnaGrafico() {
         .filter(d => new Date(d.data) >= dataInizio)
         .sort((a, b) => new Date(a.data) - new Date(b.data));
 
+    // Assicura che oggi sia sempre visibile nel grafico
+    const oggiStr = ottieniData(0);
+    if (!datiFiltrati.find(d => d.data === oggiStr)) {
+        datiFiltrati.push({ data: oggiStr, calorieMangiate: 0, proteine: 0, carbo: 0, grassi: 0, calorieBruciate: 0 });
+    }
+
     const labels = datiFiltrati.map(d => d.data);
     const fallbackTDEE = (await ottieniTDEEAttuale()) || 2300;
 
