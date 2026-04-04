@@ -82,12 +82,29 @@
         .pasto-card .pasto-desc { font-size: 0.85em; color: #555; margin-bottom: 6px; }
         .pasto-card .pasto-macro { font-size: 0.8em; color: #007bff; }
         .pasto-card .pasto-macro span { margin-right: 10px; }
-        .btn-elimina-pasto {
-            position: absolute; top: 10px; right: 10px;
-            background: #dc3545; color: white; border: none;
-            border-radius: 4px; padding: 4px 8px; font-size: 0.75em;
-            cursor: pointer;
+        .pasto-card-actions {
+            position: absolute; top: 8px; right: 8px;
+            display: flex; gap: 6px;
         }
+        .btn-elimina-pasto, .btn-modifica-pasto {
+            background: none; border: 1px solid #ddd; border-radius: 4px;
+            padding: 3px 7px; font-size: 0.75em; cursor: pointer;
+        }
+        .btn-elimina-pasto { color: #dc3545; }
+        .btn-modifica-pasto { color: #007bff; }
+
+        /* FORM MODIFICA PASTO */
+        .pasto-vista-modifica input[type="text"],
+        .pasto-vista-modifica input[type="number"] {
+            width: 100%; padding: 7px; border: 1px solid #ccc; border-radius: 4px;
+            font-size: 0.85em; margin-bottom: 6px; box-sizing: border-box;
+        }
+        .edit-macro-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; margin-bottom: 8px; }
+        .edit-macro-grid input { text-align: center; font-size: 0.8em; }
+        .edit-actions { display: flex; gap: 6px; }
+        .edit-actions button { flex: 1; padding: 7px; border: none; border-radius: 4px; font-size: 0.85em; cursor: pointer; font-weight: bold; }
+        .btn-edit-salva { background: #28a745; color: white; }
+        .btn-edit-annulla { background: #6c757d; color: white; }
         .nessun-pasto { text-align: center; color: #999; padding: 30px 0; font-size: 0.9em; }
         .hint-salvare { background: #e7f3ff; border-left: 3px solid #007bff; padding: 10px 12px; border-radius: 0 6px 6px 0; margin-bottom: 15px; font-size: 0.82em; color: #333; line-height: 1.4; }
 
