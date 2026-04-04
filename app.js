@@ -501,8 +501,15 @@ async function caricaListaPasti() {
     pasti.forEach(p => {
         const card = document.createElement('div');
         card.className = 'pasto-card';
-        card.innerHTML = `
-            <button class="btn-elimina-pasto">✕</button>
+
+        // Vista normale
+        const vistanormale = document.createElement('div');
+        vistanormale.className = 'pasto-vista-normale';
+        vistanormale.innerHTML = `
+            <div class="pasto-card-actions">
+                <button class="btn-modifica-pasto">✏️</button>
+                <button class="btn-elimina-pasto">✕</button>
+            </div>
             <h4>${escapeHTML(p.nome)}</h4>
             <div class="pasto-desc">${escapeHTML(p.descrizione || 'Nessuna descrizione')}</div>
             <div class="pasto-macro">
@@ -512,7 +519,59 @@ async function caricaListaPasti() {
                 <span>🧈 G: ${p.grassi}g</span>
             </div>
         `;
-        card.querySelector('.btn-elimina-pasto').addEventListener('click', () => eliminaPastoTipico(p.nome));
+
+        // Vista modifica
+        const vistaModifica = document.createElement('div');
+        vistaModifica.className = 'pasto-vista-modifica';
+        vistaModifica.style.display = 'none';
+        vistaModifica.innerHTML = `
+            <input type="text" class="edit-nome" value="${escapeHTML(p.nome)}" placeholder="Nome">
+            <input type="text" class="edit-desc" value="${escapeHTML(p.descrizione || '')}" placeholder="Descrizione">
+            <div class="edit-macro-grid">
+                <input type="number" class="edit-kcal" value="${p.calorie}" placeholder="kcal" step="1">
+                <input type="number" class="edit-pro" value="${p.proteine}" placeholder="P (g)" step="0.1">
+                <input type="number" class="edit-carbo" value="${p.carboidrati}" placeholder="C (g)" step="0.1">
+                <input type="number" class="edit-grassi" value="${p.grassi}" placeholder="G (g)" step="0.1">
+            </div>
+            <div class="edit-actions">
+                <button class="btn-edit-salva">Salva</button>
+                <button class="btn-edit-annulla">Annulla</button>
+            </div>
+        `;
+
+        card.appendChild(vistanormale);
+        card.appendChild(vistaModifica);
+
+        // Eventi
+        vistanormale.querySelector('.btn-elimina-pasto').addEventListener('click', () => eliminaPastoTipico(p.nome));
+        vistanormale.querySelector('.btn-modifica-pasto').addEventListener('click', () => {
+            vistanormale.style.display = 'none';
+            vistaModifica.style.display = 'block';
+        });
+        vistaModifica.querySelector('.btn-edit-annulla').addEventListener('click', () => {
+            vistaModifica.style.display = 'none';
+            vistanormale.style.display = 'block';
+        });
+        vistaModifica.querySelector('.btn-edit-salva').addEventListener('click', async () => {
+            const nuovoNome = vistaModifica.querySelector('.edit-nome').value.trim().toLowerCase();
+            if (!nuovoNome) return alert('Inserisci un nome.');
+
+            // Se il nome è cambiato, cancella il vecchio
+            if (nuovoNome !== p.nome) {
+                await db.pastiTipici.delete(p.nome);
+            }
+
+            await db.pastiTipici.put({
+                nome: nuovoNome,
+                descrizione: vistaModifica.querySelector('.edit-desc').value.trim(),
+                calorie: parseFloat(vistaModifica.querySelector('.edit-kcal').value) || 0,
+                proteine: parseFloat(vistaModifica.querySelector('.edit-pro').value) || 0,
+                carboidrati: parseFloat(vistaModifica.querySelector('.edit-carbo').value) || 0,
+                grassi: parseFloat(vistaModifica.querySelector('.edit-grassi').value) || 0
+            });
+            caricaListaPasti();
+        });
+
         container.appendChild(card);
     });
 }
